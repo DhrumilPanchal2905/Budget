@@ -1,0 +1,241 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   THEMES — every colour is an RGB triple so Tailwind can apply opacity.
+   Switch with <html data-theme="...">. Default: midnight (pure black).
+   Chart series use the validated categorical palette (dark steps on dark
+   themes, light steps on the light theme).
+   ============================================================ */
+:root,
+[data-theme="midnight"] {
+  color-scheme: dark;
+  --bg: 0 0 0;
+  --surface: 12 12 14;
+  --surface-2: 22 22 26;
+  --border: 38 38 44;
+  --fg: 240 239 236;
+  --muted: 150 150 160;
+  --primary: 57 135 229;
+  --primary-fg: 255 255 255;
+  --success: 34 170 110;
+  --danger: 230 90 90;
+  --warning: 224 160 40;
+  --info: 90 160 240;
+  --glow: 57 135 229;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --grid: rgb(255 255 255 / 0.06);
+  --axis: rgb(var(--muted));
+}
+
+[data-theme="graphite"] {
+  color-scheme: dark;
+  --bg: 17 17 17;
+  --surface: 26 26 25;
+  --surface-2: 36 36 35;
+  --border: 52 52 50;
+  --fg: 240 239 236;
+  --muted: 160 159 152;
+  --primary: 236 236 232;
+  --primary-fg: 17 17 17;
+  --success: 34 170 110;
+  --danger: 230 103 103;
+  --warning: 224 160 40;
+  --info: 120 170 230;
+  --glow: 200 200 200;
+}
+
+[data-theme="ocean"] {
+  color-scheme: dark;
+  --bg: 5 12 24;
+  --surface: 10 22 40;
+  --surface-2: 16 32 56;
+  --border: 30 52 82;
+  --fg: 232 241 252;
+  --muted: 140 162 190;
+  --primary: 34 190 220;
+  --primary-fg: 4 20 30;
+  --success: 30 180 130;
+  --danger: 236 100 100;
+  --warning: 230 170 50;
+  --info: 80 170 250;
+  --glow: 34 190 220;
+}
+
+[data-theme="emerald"] {
+  color-scheme: dark;
+  --bg: 4 14 10;
+  --surface: 9 24 18;
+  --surface-2: 14 34 26;
+  --border: 28 56 44;
+  --fg: 232 246 238;
+  --muted: 140 176 158;
+  --primary: 32 190 120;
+  --primary-fg: 3 22 14;
+  --success: 40 200 120;
+  --danger: 236 100 100;
+  --warning: 230 170 50;
+  --info: 80 170 240;
+  --glow: 32 190 120;
+}
+
+[data-theme="royal"] {
+  color-scheme: dark;
+  --bg: 10 7 22;
+  --surface: 19 14 38;
+  --surface-2: 28 21 54;
+  --border: 48 38 84;
+  --fg: 240 236 252;
+  --muted: 165 155 200;
+  --primary: 144 133 233;
+  --primary-fg: 12 8 30;
+  --success: 40 190 130;
+  --danger: 236 100 110;
+  --warning: 230 170 50;
+  --info: 110 160 250;
+  --glow: 144 133 233;
+}
+
+[data-theme="sunset"] {
+  color-scheme: dark;
+  --bg: 18 10 8;
+  --surface: 30 18 14;
+  --surface-2: 42 26 20;
+  --border: 66 42 34;
+  --fg: 250 238 230;
+  --muted: 190 160 148;
+  --primary: 240 120 60;
+  --primary-fg: 28 10 4;
+  --success: 40 180 120;
+  --danger: 236 90 90;
+  --warning: 236 176 50;
+  --info: 100 160 240;
+  --glow: 240 120 60;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: 246 246 244;
+  --surface: 255 255 255;
+  --surface-2: 241 241 238;
+  --border: 226 226 221;
+  --fg: 17 17 16;
+  --muted: 92 91 86;
+  --primary: 42 120 214;
+  --primary-fg: 255 255 255;
+  --success: 16 140 90;
+  --danger: 205 55 55;
+  --warning: 176 112 0;
+  --info: 42 120 214;
+  --glow: 42 120 214;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-8: #e34948;
+  --grid: rgb(0 0 0 / 0.07);
+}
+
+/* Dark themes share the dark chart steps */
+[data-theme="graphite"],
+[data-theme="ocean"],
+[data-theme="emerald"],
+[data-theme="royal"],
+[data-theme="sunset"] {
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --grid: rgb(255 255 255 / 0.06);
+}
+
+html,
+body {
+  background: rgb(var(--bg));
+  color: rgb(var(--fg));
+}
+
+body {
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  border-color: rgb(var(--border));
+}
+
+::selection {
+  background: rgb(var(--primary) / 0.35);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--border)) transparent;
+}
+
+/* Inputs: native date picker icon follows theme */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(var(--date-invert, 0.8));
+  cursor: pointer;
+}
+[data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: none;
+}
+
+.bg-grid {
+  background-image: linear-gradient(rgb(var(--border) / 0.5) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(var(--border) / 0.5) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+.glow {
+  background: radial-gradient(600px circle at 50% 0%, rgb(var(--glow) / 0.18), transparent 60%);
+}
+
+/* Recharts polish */
+.recharts-cartesian-grid line {
+  stroke: var(--grid);
+}
+.recharts-text {
+  fill: rgb(var(--muted));
+  font-size: 11px;
+}
+.recharts-cartesian-axis-line,
+.recharts-cartesian-axis-tick-line {
+  stroke: rgb(var(--border));
+}
+.recharts-surface:focus,
+.recharts-wrapper:focus,
+.recharts-sector:focus {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
