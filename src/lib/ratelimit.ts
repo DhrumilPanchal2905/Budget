@@ -12,8 +12,8 @@ export async function rateLimit(key: string, limit: number, windowSeconds: numbe
   const doc = await RateLimit.findOneAndUpdate(
     { key: bucket },
     { $inc: { count: 1 }, $setOnInsert: { expiresAt: new Date((windowIndex + 1) * windowSeconds * 1000 + 60_000) } },
-    { upsert: true, new: true, lean: true },
-  );
+    { upsert: true, new: true },
+  ).lean<{ count: number } | null>();
   if (doc && doc.count > limit) throw Errors.tooMany();
 }
 
