@@ -6,7 +6,7 @@ import { Errors } from "./errors";
  * Throws a 429 ApiError when the limit is exceeded.
  */
 export async function rateLimit(key: string, limit: number, windowSeconds: number): Promise<void> {
-  const now = Date.now(); 
+  const now = Date.now();
   const windowIndex = Math.floor(now / (windowSeconds * 1000));
   const bucket = `${key}:${windowIndex}`;
   const doc = await RateLimit.findOneAndUpdate(

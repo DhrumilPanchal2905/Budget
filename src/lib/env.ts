@@ -8,8 +8,13 @@ export const SECURE_COOKIES = APP_URL.startsWith("https://") || process.env.VERC
 /** `__Host-` prefix forces Secure + Path=/ + no Domain → cookie is locked to the exact host. */
 export const SESSION_COOKIE = SECURE_COOKIES ? "__Host-bp_session" : "bp_session";
 
-export const SESSION_IDLE_DAYS = Math.max(1, Math.min(30, Number(process.env.SESSION_DAYS) || 7));
-export const SESSION_ABSOLUTE_DAYS = 30;
+/** "Remember me" sessions: sliding idle window (default 30 days) and an absolute cap of 90 days. */
+export const SESSION_IDLE_DAYS = Math.max(1, Math.min(90, Number(process.env.SESSION_DAYS) || 30));
+export const SESSION_ABSOLUTE_DAYS = 90;
+/** Sessions WITHOUT "remember me": browser-session cookie + 12h idle timeout on the server. */
+export const SHORT_SESSION_HOURS = 12;
+
+export const WEBAUTHN_COOKIE = SECURE_COOKIES ? "__Host-bp_wa" : "bp_wa";
 
 export const APP_TIMEZONE = process.env.APP_TIMEZONE || "Asia/Kolkata";
 

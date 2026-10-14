@@ -38,7 +38,7 @@ export async function api<T = unknown>(
   } catch {
     /* non-JSON */
   }
-  if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/api/auth/login") && !path.startsWith("/api/auth/register")) {
+  if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/api/auth/login") && !path.startsWith("/api/auth/register") && !path.startsWith("/api/auth/passkey/login")) {
     window.location.href = "/api/auth/logout?reason=expired";
   }
   if (!res.ok || json.success === false) {

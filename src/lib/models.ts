@@ -29,6 +29,8 @@ const sessionSchema = new Schema({
   lastSeenAt: { type: Date, default: Date.now },
   ip: { type: String, maxlength: 64 },
   userAgent: { type: String, maxlength: 300 },
+  remember: { type: Boolean, default: false },
+  method: { type: String, enum: ["password", "passkey", "register"], default: "password" },
   createdAt: { type: Date, default: Date.now },
 });
 sessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
@@ -153,6 +155,28 @@ const realtimeSchema = new Schema({
 realtimeSchema.index({ channel: 1, createdAt: 1 });
 realtimeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
+// ---------- Passkeys (WebAuthn device login: fingerprint / face / device PIN) ----------
+const passkeySchema = new Schema({
+  userId: { type: ObjectId, ref: "User", required: true, index: true },
+  credentialId: { type: String, required: true, unique: true, maxlength: 1024 }, // base64url
+  publicKey: { type: String, required: true, maxlength: 4096 }, // base64url COSE key (public — not a secret)
+  counter: { type: Number, default: 0 },
+  transports: { type: [String], default: [] },
+  deviceName: { type: String, maxlength: 80, default: "This device" },
+  createdAt: { type: Date, default: Date.now },
+  lastUsedAt: { type: Date },
+});
+
+// ---------- Short-lived WebAuthn challenges (5 min, single use) ----------
+const challengeSchema = new Schema({
+  key: { type: String, required: true, unique: true },
+  challenge: { type: String, required: true },
+  type: { type: String, enum: ["register", "login"], required: true },
+  userId: { type: ObjectId, ref: "User" },
+  expiresAt: { type: Date, required: true },
+});
+challengeSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
 // ---------- Rate limit buckets (serverless-safe, shared across instances) ----------
 const rateLimitSchema = new Schema({
   key: { type: String, required: true, unique: true },
@@ -180,6 +204,8 @@ export const AuditLog = getModel("AuditLog", auditSchema, "auditlogs");
 export const PushSubscription = getModel("PushSubscription", pushSchema, "pushsubscriptions");
 export const RealtimeEvent = getModel("RealtimeEvent", realtimeSchema, "realtimeevents");
 export const RateLimit = getModel("RateLimit", rateLimitSchema, "ratelimits");
+export const Passkey = getModel("Passkey", passkeySchema, "passkeys");
+export const WebAuthnChallenge = getModel("WebAuthnChallenge", challengeSchema, "webauthnchallenges");
 
 export interface UserDoc {
   _id: Types.ObjectId;
@@ -208,6 +234,8 @@ export const COLLECTIONS = {
   pushsubscriptions: PushSubscription,
   realtimeevents: RealtimeEvent,
   ratelimits: RateLimit,
+  passkeys: Passkey,
+  webauthnchallenges: WebAuthnChallenge,
 } as const;
 
 export function isObjectId(id: unknown): id is string {

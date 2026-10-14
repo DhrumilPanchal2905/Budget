@@ -147,18 +147,27 @@ export function Modal({
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  // Keep the latest callbacks in refs so the effect below runs ONLY when the modal opens/closes.
+  // (Depending on `onClose` re-ran it on every keystroke — parents pass a new arrow each render —
+  // which stole focus from the field being typed in.)
+  const onCloseRef = useRef(onClose);
+  const dismissableRef = useRef(dismissable);
+  onCloseRef.current = onClose;
+  dismissableRef.current = dismissable;
 
   useEffect(() => {
     if (!open) return;
     const prev = document.activeElement as HTMLElement | null;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && dismissable) onClose();
+      if (e.key === "Escape" && dismissableRef.current) onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
     const t = setTimeout(() => {
-      const el = panel.current?.querySelector<HTMLElement>("input,select,textarea,button:not([data-close])");
-      el?.focus();
+      // Only auto-focus if focus isn't already inside the dialog.
+      if (panel.current && !panel.current.contains(document.activeElement)) {
+        panel.current.querySelector<HTMLElement>("input,select,textarea,button:not([data-close])")?.focus();
+      }
     }, 30);
     return () => {
       clearTimeout(t);
@@ -166,7 +175,7 @@ export function Modal({
       document.body.style.overflow = "";
       prev?.focus?.();
     };
-  }, [open, onClose, dismissable]);
+  }, [open]);
 
   if (!open) return null;
   return (

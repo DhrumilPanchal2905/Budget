@@ -72,7 +72,11 @@ export const dateOnly = (label: string) =>
 
 // ---------- Auth ----------
 export const registerSchema = z.object({ name: nameSchema, email: emailSchema, password: passwordSchema });
-export const loginSchema = z.object({ email: emailSchema, password: z.string().min(1, "Password is required.").max(128) });
+export const loginSchema = z.object({
+  email: emailSchema,
+  password: z.string().min(1, "Password is required.").max(128),
+  remember: z.boolean().optional().default(false),
+});
 export const profileSchema = z.object({
   name: nameSchema.optional(),
   currency: z.enum(["INR", "USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD"]).optional(),

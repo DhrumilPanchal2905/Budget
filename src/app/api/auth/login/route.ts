@@ -14,7 +14,7 @@ export const runtime = "nodejs";
 export const POST = route({ auth: false }, async ({ req, ip }) => {
   try {
     await rateLimit(`login:ip:${ip}`, 30, 15 * 60);
-    const { email, password } = await parseBody(req, loginSchema);
+    const { email, password, remember } = await parseBody(req, loginSchema);
     await rateLimit(`login:email:${email}`, 8, 15 * 60);
 
     // First login of an ADMIN_EMAILS address with ADMIN_PASSWORD creates the admin account.
@@ -28,8 +28,8 @@ export const POST = route({ auth: false }, async ({ req, ip }) => {
     await promoteIfBootstrapAdmin(user, ip);
     user.lastLoginAt = new Date();
     await user.save();
-    const token = await createSession(String(user._id), ip, req.headers.get("user-agent") || "");
-    await audit({ actor: user, action: "auth.login", resource: "user", resourceId: String(user._id), targetUserId: String(user._id), ip });
+    const token = await createSession(String(user._id), ip, req.headers.get("user-agent") || "", { remember, method: "password" });
+    await audit({ actor: user, action: "auth.login", resource: "user", resourceId: String(user._id), targetUserId: String(user._id), metadata: { remember }, ip });
 
     const lean = user.toObject();
     delete (lean as { passwordHash?: string }).passwordHash;
@@ -38,7 +38,7 @@ export const POST = route({ auth: false }, async ({ req, ip }) => {
       message: "Signed in successfully.",
       data: { user: publicUser(lean, effectivePermissions(lean.role, lean.permissions)) },
     });
-    setSessionCookie(res, token);
+    setSessionCookie(res, token, remember);
     return res;
   } catch (err) {
     return handleError(err);

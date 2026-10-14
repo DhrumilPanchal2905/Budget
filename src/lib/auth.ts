@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "crypto";
 import { hash, verify } from "@node-rs/argon2";
 import type { NextResponse } from "next/server";
 import { Session, User, type UserDoc } from "./models";
-import { SECURE_COOKIES, SESSION_ABSOLUTE_DAYS, SESSION_COOKIE, SESSION_IDLE_DAYS } from "./env";
+import { SECURE_COOKIES, SESSION_ABSOLUTE_DAYS, SESSION_COOKIE, SESSION_IDLE_DAYS, SHORT_SESSION_HOURS } from "./env";
 import { effectivePermissions, type Permission } from "./permissions";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -35,19 +35,39 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-export async function createSession(userId: string, ip: string, userAgent: string): Promise<string> {
+const HOUR = 60 * 60 * 1000;
+const idleMs = (remember: boolean) => (remember ? SESSION_IDLE_DAYS * DAY : SHORT_SESSION_HOURS * HOUR);
+
+/**
+ * Creates a server-side session. Only a random token goes to the browser (HttpOnly cookie);
+ * the database stores its SHA-256 hash, so a DB leak cannot be replayed as a login.
+ */
+export async function createSession(
+  userId: string,
+  ip: string,
+  userAgent: string,
+  opts: { remember?: boolean; method?: "password" | "passkey" | "register" } = {},
+): Promise<string> {
+  const remember = Boolean(opts.remember);
   const token = randomBytes(32).toString("base64url");
   await Session.create({
     tokenHash: hashToken(token),
     userId,
-    expiresAt: new Date(Date.now() + SESSION_IDLE_DAYS * DAY),
+    expiresAt: new Date(Date.now() + idleMs(remember)),
     ip,
     userAgent: userAgent.slice(0, 300),
+    remember,
+    method: opts.method ?? "password",
   });
   return token;
 }
 
-export function setSessionCookie(res: NextResponse, token: string) {
+/**
+ * remember = true  → persistent cookie (survives browser restarts, up to the absolute cap)
+ * remember = false → browser-session cookie (deleted when the browser closes)
+ * Always HttpOnly (JS can't read it), Secure on HTTPS, SameSite=Lax, __Host- prefixed in production.
+ */
+export function setSessionCookie(res: NextResponse, token: string, remember = false) {
   res.cookies.set({
     name: SESSION_COOKIE,
     value: token,
@@ -55,7 +75,7 @@ export function setSessionCookie(res: NextResponse, token: string) {
     secure: SECURE_COOKIES,
     sameSite: "lax",
     path: "/",
-    maxAge: SESSION_ABSOLUTE_DAYS * 24 * 60 * 60,
+    ...(remember ? { maxAge: SESSION_ABSOLUTE_DAYS * 24 * 60 * 60 } : {}),
   });
 }
 
@@ -86,6 +106,7 @@ export async function resolveSession(token: string | undefined | null): Promise<
     userId: unknown;
     lastSeenAt?: Date;
     createdAt: Date;
+    remember?: boolean;
   }>();
   if (!session) return null;
 
@@ -101,11 +122,11 @@ export async function resolveSession(token: string | undefined | null): Promise<
     return null;
   }
 
-  // Sliding idle expiry — refresh at most once per hour to keep writes cheap.
-  if (!session.lastSeenAt || now.getTime() - new Date(session.lastSeenAt).getTime() > 60 * 60 * 1000) {
+  // Sliding idle expiry — refresh at most every 15 minutes to keep writes cheap.
+  if (!session.lastSeenAt || now.getTime() - new Date(session.lastSeenAt).getTime() > 15 * 60 * 1000) {
     await Session.updateOne(
       { _id: session._id },
-      { $set: { lastSeenAt: now, expiresAt: new Date(now.getTime() + SESSION_IDLE_DAYS * DAY) } },
+      { $set: { lastSeenAt: now, expiresAt: new Date(now.getTime() + idleMs(Boolean(session.remember))) } },
     );
   }
 

@@ -34,7 +34,7 @@ export const POST = route({ auth: false }, async ({ req, ip }) => {
       lastLoginAt: new Date(),
     });
 
-    const token = await createSession(String(user._id), ip, req.headers.get("user-agent") || "");
+    const token = await createSession(String(user._id), ip, req.headers.get("user-agent") || "", { remember: true, method: "register" });
     await audit({ actor: user, action: "auth.register", resource: "user", resourceId: String(user._id), targetUserId: String(user._id), metadata: { role }, ip });
     await notifyUser(String(user._id), {
       type: "system",
@@ -49,7 +49,7 @@ export const POST = route({ auth: false }, async ({ req, ip }) => {
       { success: true, message: "Account created successfully.", data: { user: publicUser(lean, effectivePermissions(lean.role, lean.permissions)) } },
       { status: 201 },
     );
-    setSessionCookie(res, token);
+    setSessionCookie(res, token, true);
     return res;
   } catch (err) {
     return handleError(err);

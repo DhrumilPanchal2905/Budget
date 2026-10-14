@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BellRing, Check, KeyRound, Palette, ShieldAlert, User as UserIcon } from "lucide-react";
+import useSWR from "swr";
+import { BellRing, Check, Fingerprint, KeyRound, Palette, ShieldAlert, Smartphone, Trash2, User as UserIcon } from "lucide-react";
 import { useSession } from "@/components/session";
 import { useTheme } from "@/components/providers";
 import { useToast } from "@/components/toast";
 import { Badge, Button, Card, CardHeader, ConfirmDialog, Field, Input, PageHeader, Select, cn } from "@/components/ui";
-import { api, ApiClientError, fmtDate } from "@/lib/client";
+import { api, ApiClientError, fmtDate, timeAgo } from "@/lib/client";
+import { deviceLoginSupported, enableDeviceLogin, forgetDevice, getRememberedDevice, rememberDevice } from "@/lib/device-login";
 import { THEMES } from "@/lib/themes";
 
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD"];
@@ -184,6 +186,105 @@ function PasswordCard() {
   );
 }
 
+function DevicesCard() {
+  const { user } = useSession();
+  const toast = useToast();
+  const { data, mutate } = useSWR<{ items: { id: string; deviceName: string; createdAt: string; lastUsedAt: string | null }[] }>("/api/auth/passkeys");
+  const [supported, setSupported] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [toRemove, setToRemove] = useState<{ id: string; deviceName: string } | null>(null);
+  const [thisDeviceEnabled, setThisDeviceEnabled] = useState(false);
+
+  useEffect(() => {
+    void deviceLoginSupported().then(setSupported);
+    const d = getRememberedDevice();
+    setThisDeviceEnabled(Boolean(d?.passkey && d.email === user.email));
+  }, [user.email]);
+
+  const enable = async () => {
+    setBusy("enable");
+    try {
+      await enableDeviceLogin();
+      rememberDevice({ email: user.email, name: user.name, passkey: true });
+      setThisDeviceEnabled(true);
+      toast.success("Auto login enabled on this device.");
+      void mutate();
+    } catch (e) {
+      toast.error("Could not enable auto login", (e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const remove = async () => {
+    if (!toRemove) return;
+    setBusy(toRemove.id);
+    try {
+      const r = await api(`/api/auth/passkeys/${toRemove.id}`, { method: "DELETE" });
+      toast.success(r.message || "Device removed.");
+      const left = (data?.items.length ?? 1) - 1;
+      if (left <= 0) {
+        const d = getRememberedDevice();
+        if (d) rememberDevice({ ...d, passkey: false });
+        setThisDeviceEnabled(false);
+      }
+      setToRemove(null);
+      void mutate();
+    } catch (e) {
+      toast.error("Could not remove device", (e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader
+        title={<span className="flex items-center gap-2"><Fingerprint className="h-4 w-4 text-muted" /> Devices & auto login</span>}
+        subtitle="Sign in with fingerprint, face or device PIN. Only a public key is stored on our server."
+      />
+      <div className="space-y-3 p-5">
+        {!data?.items.length ? (
+          <p className="text-sm text-muted">No devices set up yet.</p>
+        ) : (
+          <ul className="divide-y divide-border rounded-xl border border-border">
+            {data.items.map((d) => (
+              <li key={d.id} className="flex items-center gap-3 px-4 py-3">
+                <Smartphone className="h-4 w-4 shrink-0 text-muted" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{d.deviceName}</p>
+                  <p className="text-xs text-muted">Added {timeAgo(d.createdAt)} · {d.lastUsedAt ? `last used ${timeAgo(d.lastUsedAt)}` : "never used"}</p>
+                </div>
+                <Button size="icon" variant="ghost" className="hover:text-danger" aria-label={`Remove ${d.deviceName}`} onClick={() => setToRemove(d)}>
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {supported ? (
+          !thisDeviceEnabled && (
+            <Button onClick={enable} loading={busy === "enable"}>
+              <Fingerprint className="h-4 w-4" /> Set up auto login on this device
+            </Button>
+          )
+        ) : (
+          <p className="text-xs text-muted">This browser/device has no built-in fingerprint, face or PIN authenticator.</p>
+        )}
+      </div>
+      <ConfirmDialog
+        open={Boolean(toRemove)}
+        onClose={() => setToRemove(null)}
+        onConfirm={remove}
+        loading={Boolean(toRemove && busy === toRemove.id)}
+        title="Remove this device?"
+        message={`Auto login will stop working on “${toRemove?.deviceName ?? ""}”. You can still sign in with your password.`}
+        confirmLabel="Remove device"
+      />
+    </Card>
+  );
+}
+
 function PushCard() {
   const toast = useToast();
   const { can } = useSession();
@@ -327,6 +428,7 @@ function DangerCard() {
           setErr(null);
           try {
             await api("/api/auth/account", { method: "DELETE", body: { password, confirm } });
+            forgetDevice();
             toast.success("Account deleted. Goodbye 👋");
             window.location.href = "/";
           } catch (e) {
@@ -347,6 +449,7 @@ export default function SettingsPage() {
         <ProfileCard />
         <AppearanceCard />
         <PasswordCard />
+        <DevicesCard />
         <PushCard />
         <DangerCard />
       </div>

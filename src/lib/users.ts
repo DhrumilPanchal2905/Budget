@@ -1,12 +1,12 @@
 import type { Types } from "mongoose";
-import { AuditLog, Notification, PushSubscription, Session, User, oid, type UserDoc } from "./models";
+import { AuditLog, Notification, Passkey, PushSubscription, Session, User, oid, type UserDoc } from "./models";
 import { purgeUserFinance } from "./finance";
 import { effectivePermissions } from "./permissions";
 import { Errors } from "./errors";
 
 /**
  * Data policy on account deletion:
- *  - finance records, notifications, push subscriptions, sessions and the user document are DELETED;
+ *  - finance records, notifications, push subscriptions, passkeys, sessions and the user document are DELETED;
  *  - audit log entries are KEPT for security accountability but anonymised (email removed).
  */
 export async function deleteUserCompletely(userId: Types.ObjectId | string) {
@@ -16,6 +16,7 @@ export async function deleteUserCompletely(userId: Types.ObjectId | string) {
     Notification.deleteMany({ userId: id }),
     PushSubscription.deleteMany({ userId: id }),
     Session.deleteMany({ userId: id }),
+    Passkey.deleteMany({ userId: id }),
   ]);
   await AuditLog.updateMany({ actorId: id }, { $set: { actorEmail: "deleted-user" } });
   await User.deleteOne({ _id: id });
