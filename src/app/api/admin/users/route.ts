@@ -20,7 +20,7 @@ export const GET = route({ admin: true, perms: ["users.view"] }, async ({ req })
   const q = (sp.get("q") || "").trim().slice(0, 80);
   if (q) filter.$or = [{ email: { $regex: escapeRegex(q), $options: "i" } }, { name: { $regex: escapeRegex(q), $options: "i" } }];
   const plan = sp.get("plan");
-  if (plan && ["free", "plus", "pro"].includes(plan)) filter.plan = plan;
+  if (plan && ["free", "plus", "pro", "unlimited"].includes(plan)) filter.plan = plan;
   const status = sp.get("status");
   if (status && ["active", "disabled"].includes(status)) filter.status = status;
   const role = sp.get("role");
@@ -51,7 +51,7 @@ export const POST = route({ admin: true, perms: ["users.create"] }, async ({ req
     email: data.email,
     passwordHash: await hashPassword(data.password),
     role: data.role,
-    plan: data.plan,
+    plan: data.role === "admin" ? "unlimited" : data.plan,
     permissions,
   });
   await audit({ actor: user, action: "admin.user.create", resource: "user", resourceId: String(created._id), targetUserId: String(created._id), metadata: { email: data.email, role: data.role, plan: data.plan }, ip });

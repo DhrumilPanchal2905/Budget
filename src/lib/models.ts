@@ -10,7 +10,7 @@ const userSchema = new Schema(
     passwordHash: { type: String, required: true, select: false },
     role: { type: String, enum: ["user", "admin"], default: "user", index: true },
     permissions: { type: [String], default: [] },
-    plan: { type: String, enum: ["free", "plus", "pro"], default: "free", index: true },
+    plan: { type: String, enum: ["free", "plus", "pro", "unlimited"], default: "free", index: true },
     status: { type: String, enum: ["active", "disabled"], default: "active", index: true },
     currency: { type: String, default: "INR", maxlength: 3 },
     theme: { type: String, default: "midnight", maxlength: 20 },
@@ -213,7 +213,7 @@ export interface UserDoc {
   name: string;
   role: "user" | "admin";
   permissions: string[];
-  plan: "free" | "plus" | "pro";
+  plan: "free" | "plus" | "pro" | "unlimited";
   status: "active" | "disabled";
   currency: string;
   theme: string;

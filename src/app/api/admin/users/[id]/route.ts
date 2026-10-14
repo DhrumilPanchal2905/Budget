@@ -11,7 +11,7 @@ import { publish, userChannel } from "@/lib/realtime";
 import { Errors } from "@/lib/errors";
 import { currentMonthKey, getOverall, lastMonths, monthLabel, monthRange } from "@/lib/analytics";
 import { fromMinor } from "@/lib/money";
-import { getPlan } from "@/lib/plans";
+import { getPlan, planForUser } from "@/lib/plans";
 
 export const runtime = "nodejs";
 
@@ -63,7 +63,7 @@ export const GET = route({ admin: true, perms: ["users.view"] }, async ({ params
 
   return ok({
     user: adminUserView(target),
-    plan: getPlan(target.plan),
+    plan: planForUser(target),
     usage,
     activeSessions: sessions,
     totals: overall?.totals ?? null,
@@ -115,6 +115,11 @@ export const PATCH = route({ admin: true, perms: ["users.update"] }, async ({ re
     if (data.role === "user") await assertNotLastAdmin(target, "demote");
     set.role = data.role;
     changes.push("role");
+    // Admins always get the Unlimited plan.
+    if (data.role === "admin" && target.plan !== "unlimited") {
+      set.plan = "unlimited";
+      if (!changes.includes("plan")) changes.push("plan");
+    }
   }
   if (data.status !== undefined && data.status !== target.status) {
     if (data.status === "disabled") await assertNotLastAdmin(target, "disable");

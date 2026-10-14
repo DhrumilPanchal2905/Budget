@@ -6,7 +6,7 @@ import useSWR, { useSWRConfig } from "swr";
 import { Download, HandCoins, Pencil, PiggyBank, Plus, Search, Trash2, Repeat } from "lucide-react";
 import { api, ApiClientError, fmtDate, monthStr, qs, todayStr } from "@/lib/client";
 import { RESOURCES, type FieldDef, type ResourceKey } from "@/lib/finance-config";
-import { getPlan } from "@/lib/plans";
+import { limitLabel, planForUser, usagePct } from "@/lib/plans";
 import { useSession } from "./session";
 import { useToast } from "./toast";
 import {
@@ -111,7 +111,7 @@ export function FinanceManager({
   const key = `${apiBase}/${resource}${qs({ q: dq, category, status, month, sort, order, page, limit: 15 })}`;
   const { data, error, isLoading, mutate } = useSWR<ListResponse>(key);
   const planKey = mode === "self" ? "/api/plan" : null;
-  const { data: planData } = useSWR<{ current: { maxFinanceRecords: number; maxGoals: number; name: string }; usage: { financeRecords: number; goals: number } }>(planKey);
+  const { data: planData } = useSWR<{ current: { maxFinanceRecords: number | null; maxGoals: number | null; name: string }; usage: { financeRecords: number; goals: number } }>(planKey);
 
   // ---- form state ----
   const [formOpen, setFormOpen] = useState(false);
@@ -228,9 +228,14 @@ export function FinanceManager({
     }
   };
 
-  const plan = getPlan(ownerPlan ?? user.plan);
+  const plan = mode === "self" ? planForUser(user) : planForUser({ plan: ownerPlan });
   const usage = planData?.usage;
-  const limitReached = usage ? (resource === "goal" ? usage.goals >= plan.maxGoals : usage.financeRecords >= plan.maxFinanceRecords) : false;
+  const limitReached =
+    usage && !plan.unlimited
+      ? resource === "goal"
+        ? plan.maxGoals !== null && usage.goals >= plan.maxGoals
+        : plan.maxFinanceRecords !== null && usage.financeRecords >= plan.maxFinanceRecords
+      : false;
 
   const sortOptions = useMemo(() => {
     const map: Record<ResourceKey, [string, string][]> = {
@@ -429,9 +434,9 @@ export function FinanceManager({
       {mode === "self" && usage && (
         <div className={cn("flex flex-col gap-2 rounded-xl border px-4 py-3 text-xs sm:flex-row sm:items-center sm:gap-4", limitReached ? "border-warning/40 bg-warning/5" : "border-border bg-surface")}>
           <span className="text-muted">
-            {plan.name} plan · {resource === "goal" ? `${usage.goals} / ${plan.maxGoals} goals` : `${usage.financeRecords.toLocaleString("en-IN")} / ${plan.maxFinanceRecords.toLocaleString("en-IN")} finance records`}
+            {plan.name} plan · {resource === "goal" ? `${usage.goals} / ${limitLabel(plan.maxGoals)} goals` : `${usage.financeRecords.toLocaleString("en-IN")} / ${limitLabel(plan.maxFinanceRecords)} finance records`}
           </span>
-          <Progress className="sm:max-w-xs" value={resource === "goal" ? (usage.goals / plan.maxGoals) * 100 : (usage.financeRecords / plan.maxFinanceRecords) * 100} tone={limitReached ? "warning" : "primary"} />
+          {!plan.unlimited && <Progress className="sm:max-w-xs" value={resource === "goal" ? usagePct(usage.goals, plan.maxGoals) : usagePct(usage.financeRecords, plan.maxFinanceRecords)} tone={limitReached ? "warning" : "primary"} />}
           {limitReached && <span className="font-medium text-warning">Limit reached — upgrade your plan to add more.</span>}
         </div>
       )}

@@ -35,7 +35,7 @@ function Inner() {
     }
   };
 
-  const audienceLabel = ({ all: "all active users", free: "Free plan users", plus: "Plus plan users", pro: "Pro plan users", admins: "administrators" } as Record<string, string>)[audience];
+  const audienceLabel = ({ all: "all active users", free: "Free plan users", plus: "Plus plan users", pro: "Pro plan users", unlimited: "Unlimited plan users", admins: "administrators" } as Record<string, string>)[audience];
 
   return (
     <Card className="max-w-2xl">
@@ -52,6 +52,7 @@ function Inner() {
             <option value="free">Free plan</option>
             <option value="plus">Plus plan</option>
             <option value="pro">Pro plan</option>
+            <option value="unlimited">Unlimited plan</option>
             <option value="admins">Admins only</option>
           </Select>
         </Field>

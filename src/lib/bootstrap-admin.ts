@@ -40,7 +40,7 @@ export async function ensureBootstrapAdmin(email: string, password: string, ip: 
     passwordHash: await hashPassword(envPassword),
     role: "admin",
     permissions: DEFAULT_ADMIN_PERMISSIONS,
-    plan: "pro",
+    plan: "unlimited",
   });
   await audit({ actor: created, action: "auth.admin_bootstrap", resource: "user", resourceId: String(created._id), targetUserId: String(created._id), ip });
 }
@@ -50,8 +50,9 @@ export async function ensureBootstrapAdmin(email: string, password: string, ip: 
 export async function promoteIfBootstrapAdmin(user: any, ip: string): Promise<void> {
   if (!isBootstrapAdminEmail(user.email)) return;
   const missing = DEFAULT_ADMIN_PERMISSIONS.filter((p) => !(user.permissions ?? []).includes(p));
-  if (user.role === "admin" && missing.length === 0) return;
+  if (user.role === "admin" && missing.length === 0 && user.plan === "unlimited") return;
   user.role = "admin";
+  user.plan = "unlimited";
   user.permissions = [...new Set([...(user.permissions ?? []), ...DEFAULT_ADMIN_PERMISSIONS])];
   await audit({ actor: user, action: "auth.admin_promote_env", resource: "user", resourceId: String(user._id), targetUserId: String(user._id), ip });
 }

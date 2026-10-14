@@ -3,7 +3,7 @@
 import useSWR from "swr";
 import { Check, Crown } from "lucide-react";
 import { Badge, Card, ErrorState, PageHeader, Progress, Skeleton, cn } from "@/components/ui";
-import type { PlanDef } from "@/lib/plans";
+import { limitLabel, usagePct, type PlanDef } from "@/lib/plans";
 
 interface Resp {
   current: PlanDef;
@@ -16,8 +16,8 @@ export default function PlanPage() {
   if (error) return <ErrorState message={error.message} onRetry={() => mutate()} />;
   if (isLoading || !data) return <Skeleton className="h-96" />;
   const { current, usage } = data;
-  const recPct = (usage.financeRecords / current.maxFinanceRecords) * 100;
-  const goalPct = (usage.goals / current.maxGoals) * 100;
+  const recPct = usagePct(usage.financeRecords, current.maxFinanceRecords);
+  const goalPct = usagePct(usage.goals, current.maxGoals);
 
   return (
     <>
@@ -36,11 +36,11 @@ export default function PlanPage() {
             </li>
             <li className="flex justify-between">
               <span className="text-muted">Finance records</span>
-              <span className="tabular">{current.maxFinanceRecords.toLocaleString("en-IN")}</span>
+              <span className="tabular">{limitLabel(current.maxFinanceRecords)}</span>
             </li>
             <li className="flex justify-between">
               <span className="text-muted">Savings goals</span>
-              <span className="tabular">{current.maxGoals}</span>
+              <span className="tabular">{limitLabel(current.maxGoals)}</span>
             </li>
           </ul>
         </Card>
@@ -49,10 +49,10 @@ export default function PlanPage() {
             <div className="mb-1.5 flex justify-between text-sm">
               <span>Finance records</span>
               <span className="tabular text-muted">
-                {usage.financeRecords.toLocaleString("en-IN")} / {current.maxFinanceRecords.toLocaleString("en-IN")}
+                {usage.financeRecords.toLocaleString("en-IN")} / {limitLabel(current.maxFinanceRecords)}
               </span>
             </div>
-            <Progress value={recPct} tone={recPct >= 100 ? "danger" : recPct >= 80 ? "warning" : "primary"} />
+            {!current.unlimited && <Progress value={recPct} tone={recPct >= 100 ? "danger" : recPct >= 80 ? "warning" : "primary"} />}
             <p className="mt-1.5 text-xs text-muted">
               {usage.incomes} income · {usage.expenses} expenses · {usage.debts} debts
             </p>
@@ -61,10 +61,10 @@ export default function PlanPage() {
             <div className="mb-1.5 flex justify-between text-sm">
               <span>Savings goals</span>
               <span className="tabular text-muted">
-                {usage.goals} / {current.maxGoals}
+                {usage.goals} / {limitLabel(current.maxGoals)}
               </span>
             </div>
-            <Progress value={goalPct} tone={goalPct >= 100 ? "danger" : goalPct >= 80 ? "warning" : "primary"} />
+            {!current.unlimited && <Progress value={goalPct} tone={goalPct >= 100 ? "danger" : goalPct >= 80 ? "warning" : "primary"} />}
           </div>
         </Card>
       </div>

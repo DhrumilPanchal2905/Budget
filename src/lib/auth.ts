@@ -122,6 +122,12 @@ export async function resolveSession(token: string | undefined | null): Promise<
     return null;
   }
 
+  // Admins always use the Unlimited plan — keep stored data consistent (one-time, self-healing migration).
+  if (user.role === "admin" && user.plan !== "unlimited") {
+    await User.updateOne({ _id: user._id }, { $set: { plan: "unlimited" } });
+    user.plan = "unlimited";
+  }
+
   // Sliding idle expiry — refresh at most every 15 minutes to keep writes cheap.
   if (!session.lastSeenAt || now.getTime() - new Date(session.lastSeenAt).getTime() > 15 * 60 * 1000) {
     await Session.updateOne(

@@ -30,7 +30,7 @@ export const POST = route({ auth: false }, async ({ req, ip }) => {
       passwordHash: await hashPassword(password),
       role,
       permissions: role === "admin" ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_USER_PERMISSIONS,
-      plan: "free",
+      plan: role === "admin" ? "unlimited" : "free",
       lastLoginAt: new Date(),
     });
 

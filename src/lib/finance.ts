@@ -2,7 +2,7 @@ import type { Model, Types } from "mongoose";
 import { Debt, Expense, Goal, Income, oid, isObjectId, type UserDoc } from "./models";
 import { DATE_FIELDS, MONEY_FIELDS, RESOURCES, type ResourceKey } from "./finance-config";
 import { fromMinor } from "./money";
-import { getPlan } from "./plans";
+import { limitLabel, planForUser } from "./plans";
 import { Errors } from "./errors";
 import type { Permission } from "./permissions";
 import { createSchemas, updateSchemas } from "./validation";
@@ -116,16 +116,17 @@ export async function getUsage(ownerId: string) {
 }
 
 /** SERVER-SIDE plan enforcement — called before every record creation. */
-export async function assertPlanCapacity(owner: Pick<UserDoc, "_id" | "plan">, resource: ResourceKey, adding = 1) {
-  const plan = getPlan(owner.plan);
+export async function assertPlanCapacity(owner: Pick<UserDoc, "_id" | "plan" | "role">, resource: ResourceKey, adding = 1) {
+  const plan = planForUser(owner);
+  if (plan.unlimited) return; // Unlimited plan (and every admin): no record limits
   const usage = await getUsage(String(owner._id));
   if (resource === "goal") {
-    if (usage.goals + adding > plan.maxGoals) {
+    if (plan.maxGoals !== null && usage.goals + adding > plan.maxGoals) {
       throw Errors.planLimit(`Your ${plan.name} plan allows up to ${plan.maxGoals} goals. Upgrade your plan to add more.`);
     }
-  } else if (usage.financeRecords + adding > plan.maxFinanceRecords) {
+  } else if (plan.maxFinanceRecords !== null && usage.financeRecords + adding > plan.maxFinanceRecords) {
     throw Errors.planLimit(
-      `Your ${plan.name} plan allows up to ${plan.maxFinanceRecords.toLocaleString("en-IN")} finance records. Upgrade your plan to add more.`,
+      `Your ${plan.name} plan allows up to ${limitLabel(plan.maxFinanceRecords)} finance records. Upgrade your plan to add more.`,
     );
   }
 }

@@ -38,7 +38,7 @@ const ALL = [
 await mongoose.connect(process.env.MONGODB_URI, { dbName: process.env.MONGODB_DB || "budgetpro" });
 const res = await mongoose.connection.collection("users").updateOne(
   { email },
-  { $set: { role: "admin", permissions: ALL, status: "active", updatedAt: new Date() } },
+  { $set: { role: "admin", plan: "unlimited", permissions: ALL, status: "active", updatedAt: new Date() } },
 );
 if (!res.matchedCount) console.error(`No user found with email ${email}. Register first, then run this again.`);
 else console.log(`✅ ${email} is now an admin with all permissions.`);

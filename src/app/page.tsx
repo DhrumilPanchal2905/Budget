@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowRight, BarChart3, Bell, Check, Landmark, Lock, Palette, Radio, ShieldCheck, Smartphone, Target, Zap } from "lucide-react";
-import { PLANS } from "@/lib/plans";
+import { PLANS, PUBLIC_PLAN_IDS } from "@/lib/plans";
 
 const features = [
   { icon: BarChart3, title: "Professional dashboards", text: "Monthly and all-time analytics with accurate, server-calculated charts." },
@@ -74,7 +74,7 @@ export default function Home() {
           <h2 className="text-center text-2xl font-semibold tracking-tight sm:text-3xl">Simple plans</h2>
           <p className="mt-2 text-center text-sm text-muted">Start free. Upgrade when you need more.</p>
           <div className="mt-10 grid gap-4 md:grid-cols-3">
-            {Object.values(PLANS).map((p) => (
+            {PUBLIC_PLAN_IDS.map((id) => PLANS[id]).map((p) => (
               <div key={p.id} className={`flex flex-col rounded-2xl border bg-surface p-6 ${p.id === "plus" ? "border-primary/50 ring-1 ring-primary/30" : "border-border"}`}>
                 <p className="text-sm font-semibold">{p.name}</p>
                 <p className="mt-2 text-3xl font-semibold">{p.priceLabel}</p>

@@ -11,7 +11,7 @@ import { Card, CardHeader, ErrorState, PageHeader, Skeleton } from "@/components
 import { timeAgo } from "@/lib/client";
 
 interface Stats {
-  users: { total: number; active: number; inactive: number; free: number; plus: number; pro: number; admins: number; activeLast30: number };
+  users: { total: number; active: number; inactive: number; free: number; plus: number; pro: number; unlimited: number; admins: number; activeLast30: number };
   collections: Record<string, number>;
   finance: { totalIncome: number; totalExpense: number; avgIncomePerUser: number };
   signups: { label: string; users: number }[];
@@ -45,11 +45,12 @@ function Inner() {
       </div>
     );
   const u = data.users;
-  const total = u.free + u.plus + u.pro;
+  const total = u.free + u.plus + u.pro + (u.unlimited ?? 0);
   const planData = [
     { category: "Free", total: u.free, share: total ? Math.round((u.free / total) * 1000) / 10 : 0 },
     { category: "Plus", total: u.plus, share: total ? Math.round((u.plus / total) * 1000) / 10 : 0 },
     { category: "Pro", total: u.pro, share: total ? Math.round((u.pro / total) * 1000) / 10 : 0 },
+    { category: "Unlimited", total: u.unlimited ?? 0, share: total ? Math.round(((u.unlimited ?? 0) / total) * 1000) / 10 : 0 },
   ];
   return (
     <div className="space-y-4">
@@ -57,7 +58,7 @@ function Inner() {
         <StatCard label="Total users" value={u.total.toLocaleString("en-IN")} icon={<Users className="h-4 w-4" />} hint={`${u.admins} admin${u.admins === 1 ? "" : "s"}`} />
         <StatCard label="Active users" value={u.active.toLocaleString("en-IN")} icon={<UserCheck className="h-4 w-4" />} hint={`${u.activeLast30} signed in last 30d`} />
         <StatCard label="Inactive (disabled)" value={u.inactive.toLocaleString("en-IN")} icon={<UserX className="h-4 w-4" />} />
-        <StatCard label="Paid plans" value={(u.plus + u.pro).toLocaleString("en-IN")} icon={<Crown className="h-4 w-4" />} hint={`${u.plus} Plus · ${u.pro} Pro · ${u.free} Free`} />
+        <StatCard label="Paid / unlimited plans" value={(u.plus + u.pro + (u.unlimited ?? 0)).toLocaleString("en-IN")} icon={<Crown className="h-4 w-4" />} hint={`${u.plus} Plus · ${u.pro} Pro · ${u.unlimited ?? 0} Unlimited · ${u.free} Free`} />
         <StatCard label="Income records" value={(data.collections.incomes ?? 0).toLocaleString("en-IN")} />
         <StatCard label="Expense records" value={(data.collections.expenses ?? 0).toLocaleString("en-IN")} />
         <StatCard label="Debt records" value={(data.collections.debts ?? 0).toLocaleString("en-IN")} />
@@ -124,7 +125,7 @@ function PlanDonut({ data }: { data: { category: string; total: number; share: n
   // Re-use donut, but counts are not currency: render a simple list with bars instead of money labels.
   const total = data.reduce((s, d) => s + d.total, 0);
   if (!total) return <p className="py-10 text-center text-sm text-muted">No users yet</p>;
-  const colors = ["var(--series-1)", "var(--series-2)", "var(--series-3)"];
+  const colors = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"];
   return (
     <div className="space-y-4">
       <div className="flex h-3 overflow-hidden rounded-full bg-surface-2">

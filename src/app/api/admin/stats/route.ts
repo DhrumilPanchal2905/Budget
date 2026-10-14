@@ -20,6 +20,7 @@ export const GET = route({ admin: true, perms: ["users.view"] }, async ({ perms 
           free: { $sum: { $cond: [{ $eq: ["$plan", "free"] }, 1, 0] } },
           plus: { $sum: { $cond: [{ $eq: ["$plan", "plus"] }, 1, 0] } },
           pro: { $sum: { $cond: [{ $eq: ["$plan", "pro"] }, 1, 0] } },
+          unlimited: { $sum: { $cond: [{ $eq: ["$plan", "unlimited"] }, 1, 0] } },
           admins: { $sum: { $cond: [{ $eq: ["$role", "admin"] }, 1, 0] } },
           activeLast30: { $sum: { $cond: [{ $gte: ["$lastLoginAt", new Date(Date.now() - 30 * 86400000)] }, 1, 0] } },
         },
@@ -38,9 +39,9 @@ export const GET = route({ admin: true, perms: ["users.view"] }, async ({ perms 
   const signupMap = new Map<string, number>(
     (signups as { _id: { y: number; m: number }; n: number }[]).map((s) => [`${s._id.y}-${String(s._id.m).padStart(2, "0")}`, s.n] as [string, number]),
   );
-  const u = userAgg[0] ?? { total: 0, active: 0, disabled: 0, free: 0, plus: 0, pro: 0, admins: 0, activeLast30: 0 };
+  const u = userAgg[0] ?? { total: 0, active: 0, disabled: 0, free: 0, plus: 0, pro: 0, unlimited: 0, admins: 0, activeLast30: 0 };
   return ok({
-    users: { total: u.total, active: u.active, inactive: u.disabled, free: u.free, plus: u.plus, pro: u.pro, admins: u.admins, activeLast30: u.activeLast30 },
+    users: { total: u.total, active: u.active, inactive: u.disabled, free: u.free, plus: u.plus, pro: u.pro, unlimited: u.unlimited, admins: u.admins, activeLast30: u.activeLast30 },
     collections: Object.fromEntries(counts),
     finance: {
       totalIncome: fromMinor(incomeSum[0]?.t ?? 0),

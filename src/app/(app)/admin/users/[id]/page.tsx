@@ -15,6 +15,7 @@ import { Badge, Button, Card, CardHeader, ConfirmDialog, EmptyState, ErrorState,
 import { api, ApiClientError, timeAgo } from "@/lib/client";
 import { PERMISSION_GROUPS, isAdminPermission, type Permission } from "@/lib/permissions";
 import type { ResourceKey } from "@/lib/finance-config";
+import { limitLabel } from "@/lib/plans";
 
 interface Detail {
   user: {
@@ -22,14 +23,14 @@ interface Detail {
     name: string;
     email: string;
     role: "user" | "admin";
-    plan: "free" | "plus" | "pro";
+    plan: "free" | "plus" | "pro" | "unlimited";
     status: "active" | "disabled";
     permissions: string[];
     effectivePermissions: string[];
     createdAt: string;
     lastLoginAt: string | null;
   };
-  plan: { name: string; maxFinanceRecords: number; maxGoals: number };
+  plan: { name: string; maxFinanceRecords: number | null; maxGoals: number | null; unlimited: boolean };
   usage: { incomes: number; expenses: number; debts: number; goals: number; financeRecords: number };
   activeSessions: number;
   totals: { income: number; expense: number; savings: number; debtRemaining: number; goalSaved: number; emiMonthly: number } | null;
@@ -91,10 +92,11 @@ function EditUser({ d, onSaved }: { d: Detail; onSaved: () => void }) {
           <Input value={form.email} disabled={disabled} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
         </Field>
         <Field label="Plan">
-          <Select value={form.plan} disabled={disabled || isSelf} onChange={(e) => setForm((f) => ({ ...f, plan: e.target.value as Detail["user"]["plan"] }))}>
+          <Select value={form.role === "admin" ? "unlimited" : form.plan} disabled={disabled || isSelf || form.role === "admin"} onChange={(e) => setForm((f) => ({ ...f, plan: e.target.value as Detail["user"]["plan"] }))}>
             <option value="free">Free</option>
             <option value="plus">Plus</option>
             <option value="pro">Pro</option>
+            <option value="unlimited">Unlimited</option>
           </Select>
         </Field>
         <Field label="Role">
@@ -308,7 +310,7 @@ function Inner() {
         }
       />
       <div className="mb-4 flex flex-wrap gap-1.5">
-        <Badge tone={u.plan === "free" ? "default" : "primary"}>{u.plan.toUpperCase()}</Badge>
+        <Badge tone={u.plan === "free" ? "default" : u.plan === "unlimited" ? "success" : "primary"}>{u.plan.toUpperCase()}</Badge>
         <Badge tone={u.role === "admin" ? "warning" : "default"}>{u.role}</Badge>
         <Badge tone={u.status === "active" ? "success" : "danger"}>{u.status}</Badge>
         <Badge>{data.activeSessions} active session{data.activeSessions === 1 ? "" : "s"}</Badge>
@@ -329,8 +331,8 @@ function Inner() {
       {tab === "overview" && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard label="Finance records" value={`${data.usage.financeRecords} / ${data.plan.maxFinanceRecords.toLocaleString("en-IN")}`} hint={`${data.usage.incomes} inc · ${data.usage.expenses} exp · ${data.usage.debts} debt`} />
-            <StatCard label="Goals" value={`${data.usage.goals} / ${data.plan.maxGoals}`} />
+            <StatCard label="Finance records" value={`${data.usage.financeRecords.toLocaleString("en-IN")} / ${limitLabel(data.plan.maxFinanceRecords)}`} hint={`${data.usage.incomes} inc · ${data.usage.expenses} exp · ${data.usage.debts} debt`} />
+            <StatCard label="Goals" value={`${data.usage.goals} / ${limitLabel(data.plan.maxGoals)}`} />
             {data.totals && (
               <>
                 <StatCard label="Total income" value={money(data.totals.income)} />

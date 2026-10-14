@@ -1,11 +1,11 @@
 import { route, ok } from "@/lib/api";
 import { getUsage } from "@/lib/finance";
-import { getPlan, PLANS } from "@/lib/plans";
+import { planForUser, PLANS, PUBLIC_PLAN_IDS } from "@/lib/plans";
 
 export const runtime = "nodejs";
 
 export const GET = route({}, async ({ user }) => {
-  const plan = getPlan(user.plan);
+  const plan = planForUser(user);
   const usage = await getUsage(String(user._id));
-  return ok({ current: plan, usage, plans: Object.values(PLANS) });
+  return ok({ current: plan, usage, plans: plan.unlimited ? [...PUBLIC_PLAN_IDS.map((id) => PLANS[id]), PLANS.unlimited] : PUBLIC_PLAN_IDS.map((id) => PLANS[id]) });
 });

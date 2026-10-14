@@ -15,7 +15,7 @@ interface AdminUser {
   name: string;
   email: string;
   role: "user" | "admin";
-  plan: "free" | "plus" | "pro";
+  plan: "free" | "plus" | "pro" | "unlimited";
   status: "active" | "disabled";
   currency: string;
   permissions: string[];
@@ -98,6 +98,7 @@ function CreateUserModal({ open, onClose, onCreated }: { open: boolean; onClose:
             <option value="free">Free</option>
             <option value="plus">Plus</option>
             <option value="pro">Pro</option>
+            <option value="unlimited">Unlimited</option>
           </Select>
         </Field>
         <button type="submit" className="hidden" />
@@ -150,6 +151,7 @@ function Inner() {
               <option value="free">Free</option>
               <option value="plus">Plus</option>
               <option value="pro">Pro</option>
+              <option value="unlimited">Unlimited</option>
             </Select>
             <Select value={status} onChange={(e) => setStatus(e.target.value)} className="sm:w-32" aria-label="Status">
               <option value="">All status</option>
@@ -197,7 +199,7 @@ function Inner() {
                         </Link>
                       </td>
                       <td className="px-3 py-3">
-                        <Badge tone={u.plan === "free" ? "default" : "primary"}>{u.plan.toUpperCase()}</Badge>
+                        <Badge tone={u.plan === "free" ? "default" : u.plan === "unlimited" ? "success" : "primary"}>{u.plan.toUpperCase()}</Badge>
                       </td>
                       <td className="px-3 py-3">
                         <Badge tone={u.role === "admin" ? "warning" : "default"}>{u.role}</Badge>
@@ -226,7 +228,7 @@ function Inner() {
                       <p className="truncate text-sm font-medium">{u.name}</p>
                       <p className="truncate text-xs text-muted">{u.email}</p>
                       <div className="mt-1.5 flex gap-1.5">
-                        <Badge tone={u.plan === "free" ? "default" : "primary"}>{u.plan.toUpperCase()}</Badge>
+                        <Badge tone={u.plan === "free" ? "default" : u.plan === "unlimited" ? "success" : "primary"}>{u.plan.toUpperCase()}</Badge>
                         <Badge tone={u.role === "admin" ? "warning" : "default"}>{u.role}</Badge>
                         <Badge tone={u.status === "active" ? "success" : "danger"}>{u.status}</Badge>
                       </div>

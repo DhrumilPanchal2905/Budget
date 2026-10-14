@@ -227,7 +227,7 @@ export const adminUpdateUserSchema = z.object({
 export const broadcastSchema = z.object({
   title: text(140, "Title"),
   message: text(1000, "Message"),
-  audience: z.enum(["all", "free", "plus", "pro", "admins"]).default("all"),
+  audience: z.enum(["all", "free", "plus", "pro", "unlimited", "admins"]).default("all"),
   push: z.boolean().optional().default(true),
 });
 
