@@ -1,7 +1,7 @@
 // Angel AI — understanding a message: language, intent and entities (amounts, dates, categories, people).
 // Pure TypeScript, no network, no third-party AI. Fully unit-testable.
 import { EXPENSE_CATEGORY_WORDS, INCOME_CATEGORY_WORDS, LEX, PLAN_WORDS, STOPWORDS, type LexKey } from "./lexicon";
-import { levenshtein, normalize, phonetic, scriptOf, tokenize } from "./text";
+import { levenshtein, mapLoanwords, normalize, phonetic, scriptOf, tokenize } from "./text";
 import { extractAmounts, type AmountHit } from "./numbers";
 import { parseDates, type DateInfo, type Period } from "./dates";
 
@@ -157,12 +157,13 @@ const EMAIL_RE = /[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/;
 const PERCENT_RE = /(\d+(?:\.\d+)?)\s*(%|percent|pratishat|takka|ટકા|प्रतिशत)/;
 
 export function parse(raw: string, todayStr: string): Parsed {
-  const norm = normalize(raw.slice(0, 1000));
+  const original = normalize(raw.slice(0, 1000));
+  const lang = detectLang(original); // language from what was really said / typed
+  const norm = mapLoanwords(original); // then "एक्सपेंस" → "expense" etc. so voice is understood like typing
   const email = EMAIL_RE.exec(norm)?.[0] ?? null;
   const percent = PERCENT_RE.exec(norm);
   const tokens = tokenize(norm);
   const ptoks = tokens.map(phonetic);
-  const lang = detectLang(norm);
 
   const hits: Partial<Record<LexKey, number[]>> = {};
   for (const key of Object.keys(COMPILED) as LexKey[]) {
@@ -285,7 +286,8 @@ function classify(x: ClassifyInput): Intent {
 
   // ---------- admin queries ----------
   const moneyTopic = has("expense") || has("income") || has("savings") || has("most") || !!x.exp || !!x.inc;
-  if ((has("platform") && !moneyTopic) || (has("users") && isQuestion && !has("self") && !moneyTopic)) {
+  // "mere kitne users hain", "how many users do I have", "મારા કેટલા યુઝર્સ છે", "users count" → the admin's users
+  if ((has("platform") && !moneyTopic) || (has("users") && !moneyTopic) || /(kitne|ketla|how many|कितने|કેટલા) (log|lok|people|लोग|લોકો)/.test(tokens.join(" "))) {
     if (has("users") && (has("recent") || tokens.some((t) => /^(list|names?|naam|નામ|नाम|kaun|कौन|કોણ|which)$/.test(t)))) return "list_users";
     return "platform_summary";
   }

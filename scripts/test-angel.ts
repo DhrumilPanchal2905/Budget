@@ -164,7 +164,29 @@ for (const w of wakeNo) (!isWakePhrase(w) ? pass++ : fails.push(`✗ wake should
 for (const w of ["angel band karo", "bye angel", "एंजल बंद करो", "angel stop", "angel deactivate", "એન્જલ બંધ કરો"]) (isSleepPhrase(w) ? pass++ : fails.push(`✗ sleep should fire: "${w}"`));
 
 for (const w of ["loan band karo", "haan bas", "petrol 500 bas itna", "so how much did i spend"]) (!isSleepPhrase(w) ? pass++ : fails.push(`✗ sleep should NOT fire: "${w}"`));
-const total = cases.length + wakeYes.length + wakeNo.length + 6 + 4;
+// ---- what speech recognition types (hi-IN / gu-IN write English words in native script) + "mere kitne users" ----
+const sttCases: [string, string, string?][] = [
+["मेरा बैलेंस कितना है","balance"],["इस मंथ का टोटल एक्सपेंस कितना है","expense","month"],["लास्ट मंथ कितना खर्चा हुआ","expense","lastMonth"],
+["500 का पेट्रोल ऐड करो","add_expense"],["सैलरी 50000 क्रेडिट हुई","add_income"],["सेलरी 50000 आई","add_income"],["मेरी सेविंग कितनी है","savings"],
+["मेरे गोल्स दिखाओ","goals"],["नेक्स्ट ईएमआई कब है","debts"],["मेरा लोन कितना बाकी है","debts"],["1 लाख सेव करना है 6 मंथ में क्या करूं","advice"],
+["फूड पे कितना खर्च हुआ","expense"],["ग्रोसरी 1200 ऐड करो","add_expense"],["ग्रॉसरी 1200 ऐड करो","add_expense"],["शॉपिंग में कितना गया","expense"],
+["रवि का बैलेंस बताओ","balance"],["रवि की डिटेल्स दिखाओ","profile"],["अनडू करो","undo"],["लास्ट एक्सपेंस डिलीट करो","delete_last"],
+["मेरा प्लान क्या है","profile"],["हेल्थ स्कोर क्या है","health"],["समरी दो","overview"],["लास्ट मंथ से कंपेयर करो","compare"],["एवरेज डेली खर्चा","average"],
+["इनसाइट्स बताओ","insights"],["मेरे कितने यूजर्स हैं","platform_summary"],["फ्री यूजर्स कितने हैं","users_query"],["टॉप स्पेंडर कौन है","top_users"],
+["आज का खर्चा","expense","today"],["यस्टरडे कितना खर्च हुआ","expense","yesterday"],["दिस वीक का खर्चा","expense","week"],["दिस ईयर की इनकम","income","year"],
+["मैं 50000 का फोन अफोर्ड कर सकता हूं","afford"],["टोटल बैलेंस","balance"],["मेरा हिसाब किताब बताओ","overview"],["पेट्रोल 500","add_expense"],
+["બેલેન્સ કેટલું છે","balance"],["આ મંથનો ટોટલ એક્સપેન્સ","expense","month"],["500 નું પેટ્રોલ એડ કરો","add_expense"],["સેલેરી 50000 આવી","add_income"],
+["મારી સેવિંગ કેટલી છે","savings"],["નેક્સ્ટ ઈએમઆઈ ક્યારે છે","debts"],["ગ્રોસરી 1200 એડ કરો","add_expense"],["લાસ્ટ મંથ કેટલો ખર્ચ થયો","expense","lastMonth"],
+["મારા કેટલા યુઝર્સ છે","platform_summary"],["એન્જલ મારો હિસાબ બતાવો","overview"],["ટોપ સ્પેન્ડર કોણ છે","top_users"],
+["Mera balance kitna hai","balance"],["Is month ka total expense","expense","month"],["Petrol 500 add karo","add_expense"],["Mere kitne users hain","platform_summary"],
+["What is my balance","balance"],["Add 500 for petrol","add_expense"],["How many users do I have","platform_summary"],["mere total kitne users hai","platform_summary"],
+];
+for (const [q, want, per] of sttCases) {
+  const r = parse(q, TODAY);
+  if (r.intent === want && (!per || r.period?.kind === per)) pass++;
+  else fails.push(`✗ voice "${q}" → ${r.intent}/${r.period?.kind ?? "-"} (want ${want}${per ? "/" + per : ""})`);
+}
+const total = cases.length + wakeYes.length + wakeNo.length + 6 + 4 + sttCases.length;
 
 console.log(fails.join("\n"));
 console.log(`\n${pass}/${total} passed`);

@@ -184,6 +184,8 @@ export function AngelProvider({ children }: { children: ReactNode }) {
     ttsRef.current = s;
     await s.done;
     ttsRef.current = null;
+    // short gap so the end of Angel's own voice (from the speakers) is not picked up as your next question
+    await new Promise((r) => setTimeout(r, 450));
   }, []);
 
   const handleFinalRef = useRef<(t: string, alts: string[]) => void>(() => {});

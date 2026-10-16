@@ -31,6 +31,61 @@ export function normalize(input: string): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+// English words as Hindi/Gujarati speech recognition WRITES them ("एक्सपेंस", "મંથ") → the English word.
+// Voice in hi-IN / gu-IN types English loanwords in native script, so this makes voice as accurate as typing.
+const LOAN: Record<string, string> = {};
+const loan = (en: string, ...native: string[]) => native.forEach((n) => (LOAN[n] = en));
+loan("expense", "एक्सपेंस", "एक्सपेन्स", "एक्सपेंसेस", "एक्सपेंसिस", "एक्सपेंसेज", "એક્સપેન્સ", "એક્સપેન્સીસ", "એક્સપેન્સિસ");
+loan("total", "टोटल", "ટોટલ");
+loan("month", "मंथ", "मन्थ", "मंथ्स", "મંથ", "મન્થ");
+loan("week", "वीक", "વીક");
+loan("year", "ईयर", "इयर", "यर", "યર", "ઈયર", "ઇયર");
+loan("this", "दिस", "ધીસ", "ધિસ");
+loan("last", "लास्ट", "લાસ્ટ");
+loan("previous", "प्रीवियस", "પ્રિવિયસ");
+loan("today", "टुडे", "ટુડે");
+loan("yesterday", "यस्टरडे", "યસ્ટરડે");
+loan("credited", "क्रेडिट", "क्रेडिटेड", "ક્રેડિટ");
+loan("debited", "डेबिट", "ડેબિટ");
+loan("summary", "समरी", "સમરી");
+loan("overview", "ओवरव्यू", "ઓવરવ્યૂ");
+loan("compare", "कंपेयर", "कम्पेयर", "कंपेर", "कम्पेर", "કમ્પેર", "કંપેર", "કમ્પેયર");
+loan("average", "एवरेज", "ऐवरेज", "એવરેજ");
+loan("daily", "डेली", "ડેલી");
+loan("top", "टॉप", "टोप", "ટોપ", "ટૉપ");
+loan("spender", "स्पेंडर", "સ્પેન્ડર");
+loan("afford", "अफोर्ड", "अफ़ोर्ड", "અફોર્ડ");
+loan("salary", "सेलरी", "सैलेरी", "સેલેરી");
+loan("food", "फूड", "ફૂડ");
+loan("grocery", "ग्रोसरी", "ग्रॉसरी", "ग्रोसरीज", "ગ્રોસરી");
+loan("fuel", "फ्यूल", "ફ્યુલ");
+loan("travel", "ट्रैवल", "ટ્રાવેલ");
+loan("rent", "रेंट", "રેન્ટ");
+loan("list", "लिस्ट", "લિસ્ટ");
+loan("remove", "रिमूव", "રિમૂવ");
+loan("undo", "अन्डू", "अंडू");
+loan("save", "सेव", "સેવ");
+loan("spent", "स्पेंट", "સ્પેન્ટ");
+loan("check", "चेक", "ચેક");
+loan("show", "शो", "શો");
+loan("users", "यूजर्स", "यूज़र्स", "युजर्स", "યુઝર્સ", "યૂઝર્સ");
+loan("user", "युजर", "યૂઝર");
+loan("emi", "ईएमआई", "इएमआई", "ઈએમઆઈ", "ઇએમઆઇ");
+loan("income", "इनकम", "ઇન્કમ", "ઈન્કમ");
+loan("balance", "बैलेंस", "बेलेंस", "બેલેન્સ");
+loan("budget", "बजट", "બજેટ");
+loan("details", "डिटेल्स", "डिटेल", "ડિટેલ્સ", "ડિટેલ");
+loan("insights", "इनसाइट्स", "ઇનસાઇટ્સ");
+const GU_TAIL = /(નો|ની|નું|ના|માં|મા|થી|ને)$/;
+
+/** Replaces native-script English loanwords with the English word ("इस मंथ का टोटल एक्सपेंस" → "इस month का total expense"). */
+export function mapLoanwords(norm: string): string {
+  return norm
+    .split(" ")
+    .map((t) => LOAN[t] ?? (GU_TAIL.test(t) && LOAN[t.replace(GU_TAIL, "")] ? LOAN[t.replace(GU_TAIL, "")] : t))
+    .join(" ");
+}
+
 export function scriptOf(s: string): Script {
   let deva = 0;
   let gujr = 0;

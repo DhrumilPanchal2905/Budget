@@ -93,6 +93,9 @@ export function listen(opts: ListenOptions): { stop: () => void } {
   };
 }
 
+/** Words that mean "I'm not done yet" in English / Hindi / Gujarati. */
+const CONTINUES = new Set(["ka", "ki", "ke", "ko", "se", "me", "mein", "main", "aur", "ya", "par", "pe", "to", "and", "or", "of", "for", "the", "a", "in", "on", "with", "my", "nu", "ni", "ma", "ane", "का", "की", "के", "को", "से", "में", "और", "या", "पर", "पे", "तो", "नु", "નું", "ના", "ની", "નો", "માં", "અને", "કે", "થી", "પર"]);
+
 export interface CaptureOptions {
   lang: string;
   /** how long you must stay quiet before the sentence is sent (ms) */
@@ -140,7 +143,10 @@ export function captureUtterance(o: CaptureOptions): { stop: () => void; finish:
       o.onInterim(text);
       clearTimeout(pauseTimer);
       // when the browser already marked the words final, the pause has partly passed → shorter wait
-      pauseTimer = setTimeout(finish, h.isFinal ? Math.max(500, o.silenceMs - 500) : o.silenceMs);
+      // If the sentence clearly isn't finished ("…petrol ka", "…aur", "…mein"), wait longer before sending.
+      const lastWord = (text.trim().split(/\s+/).pop() ?? "").toLowerCase();
+      const wait = CONTINUES.has(lastWord) ? Math.max(o.silenceMs, 2400) : h.isFinal ? Math.max(500, o.silenceMs - 500) : o.silenceMs;
+      pauseTimer = setTimeout(finish, wait);
     },
     onSound: o.onSound,
     onError: (code) => {

@@ -209,7 +209,7 @@ Angel is Budget Pro's **own** assistant — no OpenAI/Gemini/any third-party AI.
 
 **Switch off instantly:** set `ANGEL_ENABLED=false` in Vercel env vars.
 
-**Tests:** `npm run test:angel` (language understanding + wake word — 143 checks, no database needed).
+**Tests:** `npm run test:angel` (language understanding, voice transcripts in हिंदी/ગુજરાતી script, wake word — 198 checks, no database needed).
 
 ## 14. Performance changes
 

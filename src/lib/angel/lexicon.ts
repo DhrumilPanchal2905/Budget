@@ -86,7 +86,7 @@ export const LEX = {
   ],
   category: ["category", "categories", "breakdown", "=split", "shreni", "श्रेणी", "कैटेगरी", "કેટેગરી", "વિભાગ"],
   debt: [
-    "=debt", "=debts", "=loan", "=loans", "=owe", "=owed", "=emi", "=emis", "installment", "instalment", "=dues", "borrowed",
+    "=debt", "=debts", "=loan", "=loans", "=owe", "=owed", "ई एम आई", "ઈ એમ આઈ", "e m i", "=emi", "=emis", "installment", "instalment", "=dues", "borrowed",
     "=karz", "=karza", "=karj", "=karja", "=udhar", "=udhaar", "=kist", "=kisht", "=hapto", "=hapta", "=devu", "=karaj",
     "कर्ज", "कर्जा", "लोन", "ईएमआई", "किस्त", "उधार", "ऋण",
     "લોન", "દેવું", "હપ્તો", "હપ્તા", "ઈએમઆઈ", "ઇએમઆઇ", "ઉધાર", "કરજ",
@@ -128,7 +128,7 @@ export const LEX = {
   ],
   ack: ["=achha", "=acha", "=accha", "=hmm", "=hm", "=nice", "=great", "=cool", "=badhiya", "=badiya", "=saras", "=mast", "=sahi", "theek hai", "thik hai", "=okk", "अच्छा", "बढ़िया", "सही", "સરસ", "મસ્ત", "બરાબર છે"],
   adminWord: ["=admin", "=admins", "=administrator", "एडमिन", "એડમિન"],
-  whoWord: ["=who", "=whom", "=kisne", "kis user", "kaun sa user", "kaunsa user", "which user", "=kone", "kya user", "किसने", "किस यूज़र", "कौन", "કોણે", "કયા યુઝર"],
+  whoWord: ["=who", "=whom", "=kisne", "કોણ", "=kon", "kis user", "kaun sa user", "kaunsa user", "which user", "=kone", "kya user", "किसने", "किस यूज़र", "कौन", "કોણે", "કયા યુઝર"],
   userFilter: [
     "=active", "=inactive", "=disabled", "=blocked", "=new", "=naye", "=naya", "=latest", "=newest", "=old", "=oldest", "=purana", "=purane", "=sabse purana", "=logged", "=login", "=signup", "joined",
     "नए", "पुराने", "पुराना", "एक्टिव", "बंद", "નવા", "જૂના", "એક્ટિવ",

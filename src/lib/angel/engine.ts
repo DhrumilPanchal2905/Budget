@@ -680,10 +680,10 @@ async function answerPlatform(lang: Lang, cur: string, period: Period): Promise<
   const pl = periodLabel(lang, period);
   const m = (n: number) => money(n, cur);
   const text = L(lang, {
-    en: `Users: ${u.total} total (${u.active} active, ${u.activeLast30} logged in within 30 days, ${u.admins} admin).\nPlans: Free ${u.free}, Plus ${u.plus}, Pro ${u.pro}, Unlimited ${u.unlimited}. New sign-ups ${pl}: ${u.signups ?? 0}.\nAll users ${pl}: income ${m(s.income)}, spending ${m(s.expense)}.`,
-    hi: `यूज़र्स: कुल ${u.total} (${u.active} एक्टिव, 30 दिन में ${u.activeLast30} ने लॉगिन किया, ${u.admins} एडमिन)।\nप्लान: Free ${u.free}, Plus ${u.plus}, Pro ${u.pro}, Unlimited ${u.unlimited}। ${pl} नए साइन-अप: ${u.signups ?? 0}।\n${pl} सबकी कुल आमदनी ${m(s.income)}, कुल खर्च ${m(s.expense)}।`,
-    gu: `યુઝર્સ: કુલ ${u.total} (${u.active} એક્ટિવ, 30 દિવસમાં ${u.activeLast30} એ લૉગિન કર્યું, ${u.admins} એડમિન).\nપ્લાન: Free ${u.free}, Plus ${u.plus}, Pro ${u.pro}, Unlimited ${u.unlimited}. ${pl} નવા સાઇન-અપ: ${u.signups ?? 0}.\n${pl} બધાની કુલ આવક ${m(s.income)}, કુલ ખર્ચ ${m(s.expense)}.`,
-    hn: `Users: total ${u.total} (${u.active} active, 30 din mein ${u.activeLast30} ne login kiya, ${u.admins} admin).\nPlans: Free ${u.free}, Plus ${u.plus}, Pro ${u.pro}, Unlimited ${u.unlimited}. ${cap(pl)} naye sign-ups: ${u.signups ?? 0}.\n${cap(pl)} sabki total income ${m(s.income)}, total kharcha ${m(s.expense)}.`,
+    en: `You have ${u.total} users on Budget Pro (${u.active} active, ${u.activeLast30} logged in within 30 days, ${u.admins} admin).\nPlans: Free ${u.free}, Plus ${u.plus}, Pro ${u.pro}, Unlimited ${u.unlimited}. New sign-ups ${pl}: ${u.signups ?? 0}.\nAll users ${pl}: income ${m(s.income)}, spending ${m(s.expense)}.`,
+    hi: `आपके Budget Pro पर कुल ${u.total} यूज़र हैं (${u.active} एक्टिव, 30 दिन में ${u.activeLast30} ने लॉगिन किया, ${u.admins} एडमिन)।\nप्लान: Free ${u.free}, Plus ${u.plus}, Pro ${u.pro}, Unlimited ${u.unlimited}। ${pl} नए साइन-अप: ${u.signups ?? 0}।\n${pl} सबकी कुल आमदनी ${m(s.income)}, कुल खर्च ${m(s.expense)}।`,
+    gu: `તમારા Budget Pro પર કુલ ${u.total} યુઝર છે (${u.active} એક્ટિવ, 30 દિવસમાં ${u.activeLast30} એ લૉગિન કર્યું, ${u.admins} એડમિન).\nપ્લાન: Free ${u.free}, Plus ${u.plus}, Pro ${u.pro}, Unlimited ${u.unlimited}. ${pl} નવા સાઇન-અપ: ${u.signups ?? 0}.\n${pl} બધાની કુલ આવક ${m(s.income)}, કુલ ખર્ચ ${m(s.expense)}.`,
+    hn: `Aapke Budget Pro par total ${u.total} users hain (${u.active} active, 30 din mein ${u.activeLast30} ne login kiya, ${u.admins} admin).\nPlans: Free ${u.free}, Plus ${u.plus}, Pro ${u.pro}, Unlimited ${u.unlimited}. ${cap(pl)} naye sign-ups: ${u.signups ?? 0}.\n${cap(pl)} sabki total income ${m(s.income)}, total kharcha ${m(s.expense)}.`,
   });
   const cards: Card[] = [];
   if (top.length)
@@ -692,7 +692,7 @@ async function answerPlatform(lang: Lang, cur: string, period: Period): Promise<
       title: L(lang, { en: "Top spenders", hi: "सबसे ज़्यादा खर्च करने वाले", gu: "સૌથી વધુ ખર્ચ કરનાર", hn: "Top spenders" }) + ` · ${pl}`,
       items: top.map((x) => ({ title: x.name, subtitle: x.email, value: m(x.total), tone: "neg" as const })),
     });
-  return reply(lang, text, { cards, suggestions: sug(lang, "admin") });
+  return reply(lang, text, { speak: text.split("\n")[0], cards, suggestions: sug(lang, "admin") });
 }
 
 async function answerListUsers(lang: Lang): Promise<EngineReply> {
