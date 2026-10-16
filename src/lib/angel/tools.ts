@@ -282,7 +282,7 @@ export async function usersQuery(f: UsersFilter, limit = 10): Promise<{ total: n
   if (f.loggedInSince) q.lastLoginAt = { $gte: f.loggedInSince };
   if (f.notLoggedInSince) q.$or = [{ lastLoginAt: { $lt: f.notLoggedInSince } }, { lastLoginAt: { $exists: false } }];
   if (f.createdFrom || f.createdTo) q.createdAt = { ...(f.createdFrom ? { $gte: f.createdFrom } : {}), ...(f.createdTo ? { $lt: f.createdTo } : {}) };
-  const sort = f.sort === "old" ? { createdAt: 1 } : f.sort === "login" ? { lastLoginAt: -1 } : { createdAt: -1 };
+  const sort: Record<string, 1 | -1> = f.sort === "old" ? { createdAt: 1 } : f.sort === "login" ? { lastLoginAt: -1 } : { createdAt: -1 };
   const [total, rows] = await Promise.all([
     User.countDocuments(q),
     User.find(q).select("name email plan role status createdAt lastLoginAt").sort(sort).limit(limit).lean(),
