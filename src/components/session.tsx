@@ -133,15 +133,46 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    const es = new EventSource("/api/realtime/stream");
-    es.addEventListener("ready", () => setMode("live"));
-    // Streams are recycled every ~55s (serverless limit); EventSource reconnects by itself and
-    // resumes from Last-Event-ID, so only a CLOSED stream is reported as offline.
-    es.onerror = () => {
-      if (es.readyState === EventSource.CLOSED) setMode("offline");
+    // Performance: the stream is paused while the tab is hidden (no server polling for a tab nobody looks at)
+    // and reopened when it becomes visible again; SWR refetches on focus, so nothing is missed.
+    let es: EventSource | null = null;
+    let lastId = "";
+    const open = () => {
+      if (es) return;
+      setMode("connecting");
+      // resume from the last event we saw, so short hidden periods don't drop events
+      const s = new EventSource(lastId ? `/api/realtime/stream?lastEventId=${encodeURIComponent(lastId)}` : "/api/realtime/stream");
+      s.addEventListener("ready", () => setMode("live"));
+      // Streams are recycled every ~55s (serverless limit); EventSource reconnects by itself and
+      // resumes from Last-Event-ID, so only a CLOSED stream is reported as offline.
+      s.onerror = () => {
+        if (s.readyState === EventSource.CLOSED) setMode("offline");
+      };
+      for (const ev of events)
+        s.addEventListener(ev, (e) => {
+          const m = e as MessageEvent;
+          if (m.lastEventId) lastId = m.lastEventId;
+          handleRef.current(ev, parse(m.data));
+        });
+      es = s;
     };
-    for (const ev of events) es.addEventListener(ev, (e) => handleRef.current(ev, parse((e as MessageEvent).data)));
-    return () => es.close();
+    const close = () => {
+      es?.close();
+      es = null;
+    };
+    let hideTimer: ReturnType<typeof setTimeout> | undefined;
+    const onVisibility = () => {
+      clearTimeout(hideTimer);
+      if (document.hidden) hideTimer = setTimeout(close, 30_000); // short tab switches keep the stream
+      else open();
+    };
+    open();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearTimeout(hideTimer);
+      document.removeEventListener("visibilitychange", onVisibility);
+      close();
+    };
   }, [transport, pusherKey, pusherCluster, user.id, user.role]);
 
   return <RealtimeContext.Provider value={{ mode, transport }}>{children}</RealtimeContext.Provider>;

@@ -6,7 +6,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { RequirePerm } from "@/components/guard";
 import { useSession } from "@/components/session";
 import { StatCard } from "@/components/stat";
-import { CategoryComparison, CategoryDonut, IncomeExpenseBars, SAVINGS_COLOR, SERIES, SingleLine } from "@/components/charts";
+import { CategoryComparison, CategoryDonut, IncomeExpenseBars, SAVINGS_COLOR, SERIES, SingleLine } from "@/components/charts-lazy";
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, PageHeader, Progress, Skeleton, Tabs } from "@/components/ui";
 import { fmtDate, monthStr, qs } from "@/lib/client";
 

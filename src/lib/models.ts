@@ -185,6 +185,36 @@ const rateLimitSchema = new Schema({
 });
 rateLimitSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
+// ---------- Angel AI (assistant chat history — owned by the user, deletable per chat / per message) ----------
+const angelConversationSchema = new Schema(
+  {
+    userId: { type: ObjectId, ref: "User", required: true },
+    title: { type: String, required: true, trim: true, maxlength: 80 },
+    lang: { type: String, maxlength: 4, default: "en" },
+    context: { type: Schema.Types.Mixed, default: {} }, // follow-up memory (last period, last user, pending action)
+    messageCount: { type: Number, default: 0 },
+    lastMessageAt: { type: Date, default: Date.now },
+    preview: { type: String, maxlength: 160, default: "" },
+  },
+  { timestamps: true, minimize: false },
+);
+angelConversationSchema.index({ userId: 1, lastMessageAt: -1 });
+
+const angelMessageSchema = new Schema({
+  conversationId: { type: ObjectId, ref: "AngelConversation", required: true },
+  userId: { type: ObjectId, ref: "User", required: true },
+  role: { type: String, enum: ["user", "angel"], required: true },
+  text: { type: String, required: true, maxlength: 4000 },
+  lang: { type: String, maxlength: 4, default: "en" },
+  source: { type: String, enum: ["voice", "text", "system"], default: "text" },
+  cards: { type: Schema.Types.Mixed },
+  action: { type: Schema.Types.Mixed }, // { kind, status, summary, payload, undo } — undo data never leaves the server
+  suggestions: { type: [String], default: undefined },
+  createdAt: { type: Date, default: Date.now },
+});
+angelMessageSchema.index({ conversationId: 1, createdAt: 1 });
+angelMessageSchema.index({ userId: 1, createdAt: -1 });
+
 // Models are typed loosely (Model<any>) on purpose: every write goes through zod validation
 // in lib/validation.ts first, and loose typing keeps hot-reload + serverless re-registration simple.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -206,6 +236,8 @@ export const RealtimeEvent = getModel("RealtimeEvent", realtimeSchema, "realtime
 export const RateLimit = getModel("RateLimit", rateLimitSchema, "ratelimits");
 export const Passkey = getModel("Passkey", passkeySchema, "passkeys");
 export const WebAuthnChallenge = getModel("WebAuthnChallenge", challengeSchema, "webauthnchallenges");
+export const AngelConversation = getModel("AngelConversation", angelConversationSchema, "angelconversations");
+export const AngelMessage = getModel("AngelMessage", angelMessageSchema, "angelmessages");
 
 export interface UserDoc {
   _id: Types.ObjectId;

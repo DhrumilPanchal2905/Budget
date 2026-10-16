@@ -6,7 +6,7 @@ import { Activity, Crown, Database, IndianRupee, ScrollText, UserCheck, UserX, U
 import { RequirePerm } from "@/components/guard";
 import { useSession } from "@/components/session";
 import { StatCard } from "@/components/stat";
-import { SimpleBars } from "@/components/charts";
+import { SimpleBars } from "@/components/charts-lazy";
 import { Card, CardHeader, ErrorState, PageHeader, Skeleton } from "@/components/ui";
 import { timeAgo } from "@/lib/client";
 

@@ -36,6 +36,8 @@ import { useSession, useRealtime } from "./session";
 import { useTheme } from "./providers";
 import { useToast } from "./toast";
 import { Badge, cn } from "./ui";
+import { AngelProvider, useAngelOptional } from "./angel/angel-provider";
+import { AngelOrb } from "./angel/orb";
 
 interface NavItem {
   href: string;
@@ -109,6 +111,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const adminItems = isAdmin ? visible(ADMIN_NAV) : [];
   return (
     <nav className="flex flex-col gap-0.5">
+      <AngelNavItem onNavigate={onNavigate} />
       {render(MAIN_NAV)}
       <p className="mb-1 mt-5 px-3 text-[11px] font-medium uppercase tracking-wider text-muted/70">Account</p>
       {render(ACCOUNT_NAV)}
@@ -121,6 +124,26 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
         </>
       )}
     </nav>
+  );
+}
+
+/** "Angel AI" entry at the top of the menu (Unlimited plan / admins only). */
+function AngelNavItem({ onNavigate }: { onNavigate?: () => void }) {
+  const angel = useAngelOptional();
+  if (!angel?.eligible) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        onNavigate?.();
+        angel.setOpen(true);
+      }}
+      className={cn("mb-1 flex items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors", angel.open ? "bg-primary/12 font-medium text-fg" : "text-muted hover:bg-surface-2 hover:text-fg")}
+    >
+      <AngelOrb size={18} state={angel.mode === "wake" ? "wake" : "idle"} halo={false} />
+      <span className="flex-1">Angel AI</span>
+      {angel.mode === "wake" && <span className="h-1.5 w-1.5 rounded-full bg-success" title="Listening for “Angel active”" />}
+    </button>
   );
 }
 
@@ -331,6 +354,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   ].filter((b) => can(b.perm));
 
   return (
+    <AngelProvider>
     <div className="min-h-screen">
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-border bg-surface/60 px-3 py-5 backdrop-blur lg:flex">
@@ -399,5 +423,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </nav>
     </div>
+    </AngelProvider>
   );
 }

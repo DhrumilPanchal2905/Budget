@@ -26,7 +26,9 @@ export async function connectDB(): Promise<typeof mongoose> {
       .connect(uri, {
         dbName: process.env.MONGODB_DB || "budgetpro",
         bufferCommands: false,
-        maxPoolSize: 10,
+        // The dashboard runs ~25 small queries in parallel; a slightly bigger pool runs them in fewer waves.
+        // Kept modest because every warm serverless instance holds its own pool (Atlas has a connection cap).
+        maxPoolSize: Math.max(5, Math.min(50, Number(process.env.MONGODB_POOL_SIZE) || 15)),
         serverSelectionTimeoutMS: 10_000,
       })
       .catch((err) => {

@@ -9,7 +9,7 @@ import { RequirePerm } from "@/components/guard";
 import { useSession } from "@/components/session";
 import { useToast } from "@/components/toast";
 import { StatCard } from "@/components/stat";
-import { IncomeExpenseBars } from "@/components/charts";
+import { IncomeExpenseBars } from "@/components/charts-lazy";
 import { FinanceManager } from "@/components/finance-page";
 import { Badge, Button, Card, CardHeader, ConfirmDialog, EmptyState, ErrorState, Field, Input, PageHeader, Select, Skeleton, Tabs, Textarea, cn } from "@/components/ui";
 import { api, ApiClientError, timeAgo } from "@/lib/client";

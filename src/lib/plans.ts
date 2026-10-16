@@ -55,7 +55,7 @@ export const PLANS: Record<PlanId, PlanDef> = {
     maxGoals: null,
     advancedInsights: true,
     unlimited: true,
-    features: ["Unlimited finance records", "Unlimited savings goals", "Advanced insights", "CSV export", "Every feature included"],
+    features: ["Unlimited finance records", "Unlimited savings goals", "Angel AI assistant (voice + chat)", "Advanced insights", "CSV export", "Every feature included"],
   },
 };
 

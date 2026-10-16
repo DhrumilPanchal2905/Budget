@@ -108,11 +108,10 @@ export async function getMonthly(ownerId: string, key: string) {
   const inMonth = { userId, date: { $gte: start, $lt: end } };
   const inPrev = { userId, date: { $gte: prev.start, $lt: prev.end } };
 
-  const [income, expense, prevIncome, prevExpense, expCats, incCats, prevExpCats, incDays, expDays, debts, goals, emiPaid] = await Promise.all([
-    sumAmount(Income, inMonth),
-    sumAmount(Expense, inMonth),
+  // Performance: month totals are derived from the per-category groups (same filter → identical integer sums),
+  // which saves four database round-trips on every dashboard / analytics load.
+  const [prevIncome, expCats, incCats, prevExpCats, incDays, expDays, debts, goals] = await Promise.all([
     sumAmount(Income, inPrev),
-    sumAmount(Expense, inPrev),
     byCategory(Expense, inMonth),
     byCategory(Income, inMonth),
     byCategory(Expense, inPrev),
@@ -120,8 +119,12 @@ export async function getMonthly(ownerId: string, key: string) {
     byDay(Expense, inMonth),
     debtSummary(userId),
     goalSummary(userId),
-    sumAmount(Expense, { ...inMonth, category: "EMI / Debt" }),
   ]);
+  const total = (rows: { total: number }[]) => rows.reduce((sum, r) => sum + r.total, 0);
+  const income = total(incCats);
+  const expense = total(expCats);
+  const prevExpense = total(prevExpCats);
+  const emiPaid = expCats.find((c) => c.category === "EMI / Debt")?.total ?? 0;
 
   const daysInMonth = new Date(end.getTime() - 86400000).getUTCDate();
   let cumIncome = 0;

@@ -9,7 +9,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "vapid": "node scripts/generate-vapid.mjs",
-    "make-admin": "node scripts/make-admin.mjs"
+    "make-admin": "node scripts/make-admin.mjs",
+    "test:angel": "npx --yes tsx scripts/test-angel.ts"
   },
   "engines": {
     "node": ">=18.18.0"

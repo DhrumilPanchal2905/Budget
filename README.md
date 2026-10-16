@@ -186,3 +186,33 @@ Use `.env.local` for development and Vercel's **Production** environment for pro
 - SSE realtime polls MongoDB every 1.5 s per open tab; for many concurrent users switch to Pusher (env vars only).
 - Plan-limit checks count then insert, so two simultaneous requests could exceed a limit by one record.
 - The Inter font is downloaded by `next/font` at build time (Vercel builds have internet).
+
+## 13. Angel AI (Unlimited plan + admins)
+
+Angel is Budget Pro's **own** assistant — no OpenAI/Gemini/any third-party AI. Every answer is computed on our server from the user's MongoDB data, so numbers always match the dashboard.
+
+| Part | Where |
+|---|---|
+| Language understanding (English, हिंदी, ગુજરાતી, Hinglish — script or romanised; amounts like "dedh lakh", "2.5k"; dates like "kal", "5 tarikh", "pichle 3 mahine") | `src/lib/angel/parse.ts`, `lexicon.ts`, `numbers.ts`, `dates.ts`, `text.ts` |
+| Brain: who the question is about (self / a user / whole platform), DB answers, actions | `src/lib/angel/engine.ts`, `tools.ts` |
+| Saving plans & "can I afford it?" | `src/lib/angel/advisor.ts` |
+| Replies in 4 languages | `src/lib/angel/i18n.ts` |
+| API | `POST /api/angel/chat`, `GET/DELETE /api/angel/conversations`, `GET/DELETE /api/angel/conversations/:id`, `DELETE /api/angel/messages/:id`, `POST /api/angel/messages/:id/action` (confirm / cancel / undo) |
+| UI: live orb, voice ("Angel active" wake word, speech-to-text, spoken replies), chat, history, settings | `src/components/angel/*` |
+| Chat history (text only, per user, deletable per message / per chat / all) | collections `angelconversations`, `angelmessages` |
+
+**Access rules (enforced on the server):** Angel needs the Unlimited plan (admins always have it). A normal user only ever sees and changes their own data. An admin can ask about themselves, any user ("Ravi ka balance"), or the whole platform ("kitne users hain", "sabka is mahine ka kharcha"); writing into another user's account, creating users, changing plans and deleting entries always ask for confirmation first. All actions reuse the existing finance functions → plan limits, validation, audit log, realtime refresh and notifications work exactly as in the app. Actions can be undone for 24 hours. Temporary passwords for users created by Angel are shown once and never stored.
+
+**Voice:** uses the browser's built-in speech engine (Chrome/Edge/Safari; Chrome sends audio to Google's speech service). The wake word only works while Budget Pro is open on screen. Settings (wake word, voice language, reply language, speak replies) are per device.
+
+**Switch off instantly:** set `ANGEL_ENABLED=false` in Vercel env vars.
+
+**Tests:** `npm run test:angel` (language understanding — 116 checks, no database needed).
+
+## 14. Performance changes
+
+- Charts (the heaviest library) load on demand → numbers appear first, charts a moment later (`src/components/charts-lazy.tsx`).
+- Dashboard/analytics month totals come from the per-category query → 4 fewer DB round-trips per load (results verified identical).
+- DB pool 10 → 15 (`MONGODB_POOL_SIZE`) so the dashboard's parallel queries run in fewer waves.
+- Realtime stream pauses 30 s after a tab is hidden and resumes from the last event when visible → far fewer serverless/DB polls.
+- Biggest single speed factor outside the code: keep the MongoDB Atlas cluster in **AWS Mumbai (ap-south-1)**, the same region as Vercel (`bom1`).

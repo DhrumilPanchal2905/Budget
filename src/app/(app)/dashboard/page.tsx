@@ -6,7 +6,7 @@ import { ArrowDownLeft, ArrowUpRight, CalendarClock, HeartPulse, Landmark, Piggy
 import { useSession } from "@/components/session";
 import { RequirePerm } from "@/components/guard";
 import { StatCard } from "@/components/stat";
-import { TrendArea, CategoryDonut } from "@/components/charts";
+import { TrendArea, CategoryDonut } from "@/components/charts-lazy";
 import { InsightRow, type InsightView } from "@/components/insight-card";
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, PageHeader, Progress, Skeleton, cn } from "@/components/ui";
 import { fmtDate, timeAgo } from "@/lib/client";
