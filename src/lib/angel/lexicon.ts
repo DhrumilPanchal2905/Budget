@@ -72,7 +72,7 @@ export const LEX = {
     "સરખામણી", "તુલના", "ફરક", "કરતાં",
   ],
   most: [
-    "=most", "=top", "highest", "maximum", "=max", "where did", "where do", "which category",
+    "=most", "=top", "kahan ja", "kaha ja", "kidhar ja", "where is my money", "money going", "kya kya kharch", "kyan jay", "kya jay", "highest", "maximum", "=max", "where did", "where do", "which category",
     "sabse jyada", "sabse zyada", "sabse adhik", "kaha gaya", "kahan gaya", "kaha gaye", "kahan gaye", "kis cheej", "kis cheez",
     "sauthi vadhu", "sauthi vadhare",
     "सबसे ज्यादा", "सबसे अधिक", "कहां गया", "कहाँ गया", "कहां गए", "किस चीज",
@@ -86,7 +86,7 @@ export const LEX = {
   ],
   category: ["category", "categories", "breakdown", "=split", "shreni", "श्रेणी", "कैटेगरी", "કેટેગરી", "વિભાગ"],
   debt: [
-    "=debt", "=debts", "=loan", "=loans", "=emi", "=emis", "installment", "instalment", "=dues", "borrowed",
+    "=debt", "=debts", "=loan", "=loans", "=owe", "=owed", "=emi", "=emis", "installment", "instalment", "=dues", "borrowed",
     "=karz", "=karza", "=karj", "=karja", "=udhar", "=udhaar", "=kist", "=kisht", "=hapto", "=hapta", "=devu", "=karaj",
     "कर्ज", "कर्जा", "लोन", "ईएमआई", "किस्त", "उधार", "ऋण",
     "લોન", "દેવું", "હપ્તો", "હપ્તા", "ઈએમઆઈ", "ઇએમઆઇ", "ઉધાર", "કરજ",
@@ -103,16 +103,35 @@ export const LEX = {
     "છેલ્લા", "છેલ્લી", "છેલ્લો", "તાજેતર", "વ્યવહાર", "ટ્રાન્ઝેક્શન", "એન્ટ્રી",
   ],
   health: [
-    "=health", "=score", "financial health", "=condition", "=status", "how am i doing",
+    "=health", "=score", "financial health", "=condition", "=status",
     "=halat", "=haalat", "=sthiti", "=stithi", "kaisi hai halat", "=paristhiti",
     "स्वास्थ्य", "स्थिति", "हालत", "स्कोर", "हेल्थ",
     "સ્થિતિ", "હાલત", "સ્કોર", "હેલ્થ", "પરિસ્થિતિ",
   ],
   insight: [
-    "insight", "insights", "analysis", "analyse", "analyze", "=review", "=summary", "=report", "=overview",
-    "vishleshan", "saransh", "samjhao", "samjao", "=riport",
-    "विश्लेषण", "सारांश", "रिपोर्ट", "इनसाइट", "समझाओ",
-    "વિશ્લેષણ", "સારાંશ", "રિપોર્ટ", "ઇનસાઇટ", "સમજાવો",
+    "insight", "insights", "analysis", "analyse", "analyze", "=review",
+    "vishleshan", "samjhao", "samjao",
+    "विश्लेषण", "इनसाइट", "समझाओ",
+    "વિશ્લેષણ", "ઇનસાઇટ", "સમજાવો",
+  ],
+  overview: [
+    "=summary", "=overview", "=report", "how am i doing", "how is my", "my budget", "=budget", "=situation", "=position", "everything", "full picture",
+    "=hisab", "=hisaab", "=hisaab-kitaab", "hisab kitab", "sab kuch", "sab kuchh", "sab batao", "kaisa chal", "kaise chal", "kya haal", "=haal", "=riport", "=saransh", "pura hisab", "poora hisab",
+    "kevu chale", "kem chale", "badhu batavo", "badhu kaho", "=hisab-kitab",
+    "हिसाब", "सब कुछ", "सारांश", "रिपोर्ट", "बजट", "कैसा चल", "क्या हाल",
+    "હિસાબ", "બધું", "સારાંશ", "રિપોર્ટ", "બજેટ", "કેવું ચાલે", "કેમ ચાલે",
+  ],
+  profile: [
+    "=details", "=detail", "=email", "=mail", "email id", "mail id", "=login", "=logged", "last login", "=account", "=naam", "=name", "=joined", "=join", "=records", "=record", "=data", "baare mein", "bare mein", "bare me", "bare mai", "baare me", "=about", "=info", "information", "=jankari", "=jaankari", "=profile", "=mahiti", "=vishe", "=sign",
+    "जानकारी", "बारे में", "ईमेल", "लॉगिन", "नाम", "प्रोफाइल", "डिटेल",
+    "માહિતી", "વિશે", "ઈમેલ", "લૉગિન", "લોગિન", "નામ", "પ્રોફાઇલ", "ડિટેલ",
+  ],
+  ack: ["=achha", "=acha", "=accha", "=hmm", "=hm", "=nice", "=great", "=cool", "=badhiya", "=badiya", "=saras", "=mast", "=sahi", "theek hai", "thik hai", "=okk", "अच्छा", "बढ़िया", "सही", "સરસ", "મસ્ત", "બરાબર છે"],
+  adminWord: ["=admin", "=admins", "=administrator", "एडमिन", "એડમિન"],
+  whoWord: ["=who", "=whom", "=kisne", "kis user", "kaun sa user", "kaunsa user", "which user", "=kone", "kya user", "किसने", "किस यूज़र", "कौन", "કોણે", "કયા યુઝર"],
+  userFilter: [
+    "=active", "=inactive", "=disabled", "=blocked", "=new", "=naye", "=naya", "=latest", "=newest", "=old", "=oldest", "=purana", "=purane", "=sabse purana", "=logged", "=login", "=signup", "joined",
+    "नए", "पुराने", "पुराना", "एक्टिव", "बंद", "નવા", "જૂના", "એક્ટિવ",
   ],
   forecast: [
     "forecast", "predict", "projection", "end of month", "month end", "will i save", "will be left",
@@ -126,7 +145,7 @@ export const LEX = {
     "સરેરાશ", "રોજ", "દરરોજ", "રોજનો", "રોજનું",
   ],
   greet: [
-    "=hi", "=hii", "=hello", "=hey", "=namaste", "=namaskar", "good morning", "good evening", "good afternoon", "how are you", "kaise ho", "kaisi ho", "=kem", "kem cho", "kem che", "=jai", "jai shree krishna", "=helo",
+    "=hi", "=hii", "=hello", "=hey", "=namaste", "=namaskar", "good morning", "good evening", "good afternoon", "good night", "how are you", "kaise ho", "kaisi ho", "kya haal hai", "haal chal", "=kem", "kem cho", "kem che", "=jai", "jai shree krishna", "=helo",
     "नमस्ते", "नमस्कार", "हेलो", "हैलो", "कैसी हो", "कैसे हो", "जय श्री कृष्ण",
     "નમસ્તે", "નમસ્કાર", "કેમ છો", "કેમ છે", "હેલો", "જય શ્રી કૃષ્ણ",
   ],
@@ -207,7 +226,7 @@ export const LEX = {
     "યુઝર", "યૂઝર", "વપરાશકર્તા", "સભ્ય", "એકાઉન્ટ", "ખાતું",
   ],
   platform: [
-    "all users", "every user", "=everyone", "=platform", "=everybody", "whole app", "entire app", "all accounts",
+    "all users", "every user", "=everyone", "=platform", "other users", "=dusre", "=doosre", "=dusron", "दूसरे", "दूसरों", "બીજા", "=bija", "=everybody", "whole app", "entire app", "all accounts",
     "=sabka", "=sabke", "=sabki", "sab ka", "sab ke", "=sabhi", "sab log", "sab users", "=badhanu", "=badhana", "=badhani",
     "सबका", "सबके", "सबकी", "सभी", "सब लोग", "प्लेटफॉर्म", "प्लेटफार्म",
     "બધાનું", "બધાના", "બધાની", "બધા", "પ્લેટફોર્મ",

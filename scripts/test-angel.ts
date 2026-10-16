@@ -113,6 +113,30 @@ const cases: Case[] = [
   { q: "ok kar do", intent: "yes" },
   { q: "bye angel", intent: "stop" },
   { q: "help", intent: "help" },
+  // ---- overview / profile / admin knows everything ----
+  { q: "mera hisaab batao", intent: "overview" },
+  { q: "मेरा हिसाब बताओ", intent: "overview" },
+  { q: "મારો હિસાબ બતાવો", intent: "overview" },
+  { q: "kaisa chal raha hai mera budget", intent: "overview" },
+  { q: "how am i doing", intent: "overview" },
+  { q: "give me a summary", intent: "overview" },
+  { q: "mera plan kya hai", intent: "profile" },
+  { q: "mera naam kya hai", intent: "profile" },
+  { q: "ravi ke baare mein batao", intent: "profile" },
+  { q: "ravi ka email kya hai", intent: "profile" },
+  { q: "ravi ne last login kab kiya", intent: "profile" },
+  { q: "details of ravi", intent: "profile" },
+  { q: "sabse zyada kharcha kis user ne kiya", intent: "top_users" },
+  { q: "who spent the most this month", intent: "top_users" },
+  { q: "free users kitne hain", intent: "users_query" },
+  { q: "aaj kitne users ne login kiya", intent: "users_query", period: "today" },
+  { q: "admin kaun hai", intent: "users_query" },
+  { q: "disabled users", intent: "users_query" },
+  { q: "paise kahan ja rahe hain", intent: "top_categories" },
+  { q: "how much do i owe", intent: "debts" },
+  { q: "kya haal hai", intent: "greet" },
+  { q: "achha", intent: "ack" },
+  { q: "budget kaise control karu", intent: "advice" },
 ];
 
 let pass = 0;
@@ -133,7 +157,7 @@ for (const c of cases) {
 }
 
 // ---- wake word ----
-const wakeYes = ["angel active", "Angel activate", "hey angel", "एंजल एक्टिव", "एंजेल एक्टिव", "angle active", "એન્જલ એક્ટિવ", "ok angel", "एंजल चालू", "angel chalu karo", "hi angel", "ઍન્જલ ચાલુ", "enjal active"];
+const wakeYes = ["and gel active", "एंजेल एक्टिवेट", "એન્જલ શરૂ", "angels active", "angel active", "Angel activate", "hey angel", "एंजल एक्टिव", "एंजेल एक्टिव", "angle active", "એન્જલ એક્ટિવ", "ok angel", "एंजल चालू", "angel chalu karo", "hi angel", "ઍન્જલ ચાલુ", "enjal active"];
 const wakeNo = ["angel", "active", "mera balance kitna hai", "the angel movie was good", "angels are", "petrol 500"];
 for (const w of wakeYes) (isWakePhrase(w) ? pass++ : fails.push(`✗ wake should fire: "${w}"`));
 for (const w of wakeNo) (!isWakePhrase(w) ? pass++ : fails.push(`✗ wake should NOT fire: "${w}"`));
@@ -141,6 +165,7 @@ for (const w of ["angel band karo", "bye angel", "एंजल बंद कर�
 
 for (const w of ["loan band karo", "haan bas", "petrol 500 bas itna", "so how much did i spend"]) (!isSleepPhrase(w) ? pass++ : fails.push(`✗ sleep should NOT fire: "${w}"`));
 const total = cases.length + wakeYes.length + wakeNo.length + 6 + 4;
+
 console.log(fails.join("\n"));
 console.log(`\n${pass}/${total} passed`);
 if (fails.length) process.exit(1);

@@ -13,6 +13,7 @@ const bodySchema = z.object({
   conversationId: z.string().max(40).nullable().optional(),
   source: z.enum(["voice", "text"]).default("text"),
   lang: z.enum(["auto", "en", "hi", "gu", "hn"]).default("auto"),
+  alts: z.array(z.string().trim().max(1000)).max(3).optional(),
 });
 
 /** Send a message to Angel → Angel's answer (and any action it took). Both are saved in the chat history. */
@@ -33,9 +34,10 @@ export const POST = route({}, async ({ req, user, perms, ip }) => {
 
   const userMsg = await AngelMessage.create({ conversationId: conv._id, userId: user._id, role: "user", text: body.message, source: body.source, lang: "en" });
 
-  const result = await respond({ actor: user, perms, ip, text: body.message, ctx: (conv.context ?? {}) as AngelContext, langPref: body.lang, source: body.source });
+  const result = await respond({ actor: user, perms, ip, text: body.message, ctx: (conv.context ?? {}) as AngelContext, langPref: body.lang, source: body.source, alts: body.alts });
   const r = result.reply;
   userMsg.lang = r.lang;
+  if (result.usedText) userMsg.text = result.usedText; // the voice guess Angel actually understood
   await userMsg.save();
 
   let updated: { id: string; action: ReturnType<typeof actionView> } | null = null;

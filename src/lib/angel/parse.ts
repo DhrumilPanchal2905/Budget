@@ -13,9 +13,10 @@ export type Intent =
   | "health" | "insights" | "forecast" | "average" | "advice" | "afford"
   | "add_expense" | "add_income" | "goal_contribute" | "pay_emi" | "create_goal" | "create_debt" | "delete_last" | "undo"
   | "platform_summary" | "list_users" | "user_info" | "create_user" | "change_plan"
+  | "overview" | "profile" | "top_users" | "users_query" | "ack"
   | "unknown";
 
-export const QUERY_INTENTS: Intent[] = ["balance", "expense", "income", "savings", "compare", "top_categories", "largest", "recent", "debts", "goals", "health", "insights", "forecast", "average", "advice", "afford", "platform_summary", "user_info"];
+export const QUERY_INTENTS: Intent[] = ["balance", "expense", "income", "savings", "compare", "top_categories", "largest", "recent", "debts", "goals", "health", "insights", "forecast", "average", "advice", "afford", "platform_summary", "user_info", "overview", "profile", "top_users", "users_query"];
 
 // ---------------- matcher ----------------
 interface Compiled {
@@ -236,7 +237,7 @@ function classify(x: ClassifyInput): Intent {
   const short = tokens.length <= 4;
 
   // conversation control
-  const topic = (["balance", "expense", "income", "savings", "debt", "goal", "deleteVerb", "addVerb", "users", "plan", "recent", "health", "insight", "identity"] as LexKey[]).some(has);
+  const topic = (["balance", "expense", "income", "savings", "debt", "goal", "deleteVerb", "addVerb", "users", "plan", "recent", "health", "insight", "identity", "overview", "profile", "adminWord"] as LexKey[]).some(has);
   if (has("stop") && short && !amount && !topic) return "stop";
   if (has("undo") && !amount && tokens.length <= 7) return "undo";
   if (has("yes") && short && !amount && !has("question") && !topic) return "yes";
@@ -271,6 +272,16 @@ function classify(x: ClassifyInput): Intent {
   // ---------- small talk ----------
   if (has("identity")) return "identity";
   if (has("help") && !amount && !has("savings") && !has("advice")) return "help";
+  if (has("greet") && short && !has("self") && !amount) return "greet";
+  if (has("ack") && short && !amount && !topic) return "ack";
+
+  // ---------- people / users (admin) ----------
+  const moneyTopicEarly = has("expense") || has("income") || has("savings") || has("balance") || has("debt") || has("goal") || !!x.exp || !!x.inc;
+  const anyUserWord = userWord || has("users");
+  if ((has("most") || has("largest")) && (has("whoWord") || tokens.some((t) => /^(users|यूज़र्स|यूजर्स|યુઝર્સ)$/.test(t)))) return "top_users";
+  if (!moneyTopicEarly && ((anyUserWord && (!!x.planId || has("userFilter") || has("adminWord"))) || (has("adminWord") && (has("question") || has("whoWord"))))) return "users_query";
+  if (has("profile") && !wantsAdd && !amount && !has("advice")) return "profile";
+  if (has("plan") && (has("question") || has("self")) && !has("savings") && !has("expense") && !amount && !has("changeVerb")) return "profile";
 
   // ---------- admin queries ----------
   const moneyTopic = has("expense") || has("income") || has("savings") || has("most") || !!x.exp || !!x.inc;
@@ -281,8 +292,9 @@ function classify(x: ClassifyInput): Intent {
 
   // ---------- money questions ----------
   if (has("afford") && amount) return "afford";
-  if (has("advice") && (has("savings") || has("expense") || amount || has("goal") || has("debt") || has("income"))) return "advice";
+  if (has("advice") && (has("savings") || has("expense") || amount || has("goal") || has("debt") || has("income") || has("overview"))) return "advice";
   if (has("savings") && amount && !wantsAdd) return "advice";
+  if (has("overview") && !has("debt") && !has("goal")) return "overview";
   if (has("forecast")) return "forecast";
   if (has("compare")) return "compare";
   if (has("largest")) return "largest";

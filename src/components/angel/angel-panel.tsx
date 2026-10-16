@@ -201,7 +201,7 @@ function VoiceStage() {
       <AngelOrb size={176} state={a.mode} levelRef={a.levelRef} />
       <p className="mt-3 text-sm font-medium" aria-live="polite">{STATUS[a.mode]}</p>
       <p className={cn("mt-2 min-h-[1.5rem] max-w-[34ch] text-[15px] leading-snug", a.transcript ? "text-fg" : "text-muted")}>{hint}</p>
-      <p className="mt-3 text-[11px] text-muted/80">Say “Angel band karo” or tap the mic to stop.</p>
+      <p className="mt-3 text-[11px] text-muted/80">Pause for a moment and it sends by itself. Say “Angel band karo” or tap the mic to stop.</p>
     </div>
   );
 }
@@ -465,6 +465,13 @@ function SettingsView() {
           <option value="hi">हिंदी</option>
           <option value="gu">ગુજરાતી</option>
           <option value="hn">Hinglish</option>
+        </select>
+      </Row>
+      <Row title="Send after a pause of" desc="When you stop talking for this long, Angel sends what you said — no button needed.">
+        <select value={s.pauseMs} onChange={(e) => a.updateSettings({ pauseMs: Number(e.target.value) })} className="rounded-lg border border-border bg-surface-2 px-2.5 py-1.5">
+          <option value={800}>0.8 s (fast)</option>
+          <option value={1200}>1.2 s</option>
+          <option value={1800}>1.8 s (relaxed)</option>
         </select>
       </Row>
       <Row title="Speak replies" desc="Angel answers out loud when you talk to her.">

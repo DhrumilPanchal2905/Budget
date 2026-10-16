@@ -261,3 +261,45 @@ export async function allUsersLite(limit = 5000): Promise<UserLite[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return rows.map((u: any) => ({ _id: String(u._id), name: u.name, email: u.email, plan: u.plan, role: u.role, status: u.status, createdAt: u.createdAt, lastLoginAt: u.lastLoginAt }));
 }
+
+export interface UsersFilter {
+  plan?: string | null;
+  role?: "admin" | null;
+  status?: "active" | "disabled" | null;
+  loggedInSince?: Date | null; // active users
+  notLoggedInSince?: Date | null; // inactive users
+  createdFrom?: Date | null;
+  createdTo?: Date | null;
+  sort?: "new" | "old" | "login";
+}
+
+/** Admin user search for Angel: counts + the first matching users. */
+export async function usersQuery(f: UsersFilter, limit = 10): Promise<{ total: number; items: UserLite[] }> {
+  const q: Record<string, unknown> = {};
+  if (f.plan) q.plan = f.plan;
+  if (f.role) q.role = f.role;
+  if (f.status) q.status = f.status;
+  if (f.loggedInSince) q.lastLoginAt = { $gte: f.loggedInSince };
+  if (f.notLoggedInSince) q.$or = [{ lastLoginAt: { $lt: f.notLoggedInSince } }, { lastLoginAt: { $exists: false } }];
+  if (f.createdFrom || f.createdTo) q.createdAt = { ...(f.createdFrom ? { $gte: f.createdFrom } : {}), ...(f.createdTo ? { $lt: f.createdTo } : {}) };
+  const sort = f.sort === "old" ? { createdAt: 1 } : f.sort === "login" ? { lastLoginAt: -1 } : { createdAt: -1 };
+  const [total, rows] = await Promise.all([
+    User.countDocuments(q),
+    User.find(q).select("name email plan role status createdAt lastLoginAt").sort(sort).limit(limit).lean(),
+  ]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { total, items: rows.map((u: any) => ({ _id: String(u._id), name: u.name, email: u.email, plan: u.plan, role: u.role, status: u.status, createdAt: u.createdAt, lastLoginAt: u.lastLoginAt })) };
+}
+
+export async function topEarners(start: Date, end: Date, limit = 5) {
+  const rows = await Income.aggregate([
+    { $match: { date: { $gte: start, $lt: end } } },
+    { $group: { _id: "$userId", total: { $sum: "$amount" } } },
+    { $sort: { total: -1 } },
+    { $limit: limit },
+    { $lookup: { from: "users", localField: "_id", foreignField: "_id", as: "u" } },
+    { $project: { total: 1, "u.name": 1, "u.email": 1 } },
+  ]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return rows.map((r: any) => ({ name: r.u?.[0]?.name ?? "deleted user", email: r.u?.[0]?.email ?? "", total: fromMinor(r.total) }));
+}

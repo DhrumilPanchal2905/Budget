@@ -2,9 +2,9 @@
 // Used in the browser on live speech transcripts. Pure + tiny so it can run on every interim result.
 import { levenshtein, nameKey, normalize, tokenize } from "./text";
 
-const NAME_KEYS = new Set(["angel", "angle", "anjel", "anjal", "enjal", "enjel", "ainjal", "ainjel", "aenjal", "enjl", "anjl", "angl", "ejal", "enjil"]);
-const ACTIVATE_KEYS = new Set(["active", "activ", "activate", "activet", "aktiv", "ektiv", "ektive", "ektivet", "calu", "caloo", "start", "on", "jago", "jag", "uto", "suno", "sambal", "samb", "ektivat", "activated", "wake", "wakeup"]);
-const PREFIX_KEYS = new Set(["hey", "hi", "ok", "okay", "hello", "he", "hai", "oye", "are"]);
+const NAME_KEYS = new Set(["angel", "angle", "anjel", "anjal", "enjal", "enjel", "ainjal", "ainjel", "aenjal", "aenjel", "enjl", "anjl", "angl", "ejal", "enjil", "angil", "enjol", "ainjel", "ejel", "enjle", "angels", "enjals", "injal", "enjala", "angela"]);
+const ACTIVATE_KEYS = new Set(["saru", "suru", "shuru", "sanbal", "active", "activ", "activate", "activet", "activa", "actif", "aktiv", "aktive", "ektiv", "ektive", "ektivet", "ektivat", "ektif", "aiktiv", "aiktive", "ectiv", "activated", "calu", "caloo", "calo", "cal", "start", "on", "jago", "jag", "uto", "suno", "sambal", "samb", "sambalo", "wake", "wakeup", "aktivet", "aktivat"]);
+const PREFIX_KEYS = new Set(["hey", "hi", "ok", "okay", "hello", "he", "hai", "oye", "are", "hay", "e", "ey"]);
 const SLEEP_KEYS = new Set(["band", "bandh", "bye", "goodbye", "stop", "deactivate", "deactivet", "alvida", "avjo", "avajo", "cup", "so", "bas", "ruko", "rako"]);
 
 function key(tok: string): string {
@@ -20,7 +20,15 @@ export function isNameToken(tok: string): boolean {
 
 /** "Angel active" / "hey Angel" / "एंजल एक्टिव" / "એન્જલ ચાલુ" → true. "angel" alone → false. */
 export function isWakePhrase(text: string): boolean {
-  const toks = tokenize(normalize(text));
+  const raw = tokenize(normalize(text));
+  // speech engines sometimes split the name: "and gel active", "an gel active" → join neighbours that form the name
+  const toks: string[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    if (i + 1 < raw.length && !isNameToken(raw[i]) && isNameToken(raw[i] + raw[i + 1])) {
+      toks.push(raw[i] + raw[i + 1]);
+      i++;
+    } else toks.push(raw[i]);
+  }
   for (let i = 0; i < toks.length; i++) {
     if (!isNameToken(toks[i])) continue;
     const prev = toks[i - 1] ? key(toks[i - 1]) : "";
@@ -59,4 +67,33 @@ export function stripWake(text: string): string {
     return !(ACTIVATE_KEYS.has(k) || PREFIX_KEYS.has(k));
   });
   return out.join(" ");
+}
+
+/**
+ * The words spoken AFTER the wake phrase: "angel active mera balance batao" → "mera balance batao".
+ * Anything said before "Angel" (TV, other people) is ignored.
+ */
+export function afterWake(text: string): string {
+  const toks = tokenize(normalize(text));
+  let last = -1;
+  toks.forEach((t, i) => {
+    if (isNameToken(t)) last = i;
+  });
+  if (last < 0) return "";
+  let rest = toks.slice(last + 1);
+  while (rest.length && (ACTIVATE_KEYS.has(key(rest[0])) || PREFIX_KEYS.has(key(rest[0])) || ["karo", "kar", "ho", "jao", "करो", "हो", "જા", "કરો", "थाओ", "થાઓ", "ji", "जी"].includes(rest[0]))) rest = rest.slice(1);
+  return rest.join(" ");
+}
+
+/** "Angel mera balance batao" — the name said first, followed by a real request (no "active" needed). */
+export function startsWithName(text: string): boolean {
+  const toks = tokenize(normalize(text));
+  const i = toks.findIndex((t) => !PREFIX_KEYS.has(key(t)));
+  return i >= 0 && isNameToken(toks[i]) && toks.length - i - 1 >= 2;
+}
+
+/** The whole utterance is just the name ("Angel", "hey Angel", "एंजल") — treat as a call when it is a final result. */
+export function isNameOnly(text: string): boolean {
+  const toks = tokenize(normalize(text));
+  return toks.length > 0 && toks.length <= 3 && toks.some(isNameToken) && toks.every((t) => isNameToken(t) || PREFIX_KEYS.has(key(t)) || ["हे", "ओके", "હે", "ઓકે", "जी", "ji"].includes(t));
 }

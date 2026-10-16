@@ -6,7 +6,7 @@
 import { AngelMessage, Debt, Expense, Goal, User, isObjectId, oid, type UserDoc } from "../models";
 import type { Permission } from "../permissions";
 import { DEFAULT_USER_PERMISSIONS, isAdminPermission } from "../permissions";
-import { contributeGoal, createRecord, deleteRecord, payDebt, requiredPerms } from "../finance";
+import { contributeGoal, createRecord, deleteRecord, getUsage, payDebt, requiredPerms } from "../finance";
 import { getDashboard, todayUTC } from "../analytics";
 import { generateInsights } from "../insights";
 import { audit } from "../audit";
@@ -14,7 +14,7 @@ import { notifyUser } from "../notify";
 import { publish, userChannel } from "../realtime";
 import { randomBytes } from "crypto";
 import { hashPassword } from "../auth";
-import { getPlan } from "../plans";
+import { getPlan, planForUser } from "../plans";
 import { toMinor, fromMinor } from "../money";
 import { APP_TIMEZONE } from "../env";
 import { ApiError } from "../errors";
@@ -91,6 +91,8 @@ export interface EngineInput {
   ctx: AngelContext;
   langPref: AngelLangPref;
   source: "voice" | "text";
+  /** other guesses from speech recognition — used when the main guess isn't understood */
+  alts?: string[];
 }
 
 export interface EngineResult {
@@ -98,6 +100,8 @@ export interface EngineResult {
   ctx: AngelContext;
   /** the user asked to undo the last action (the route finds it in the chat history) */
   undo?: boolean;
+  /** when a speech alternative was understood better than the main guess, the text that was used */
+  usedText?: string;
   /** an earlier Angel message whose action changed (confirmed / cancelled by voice) */
   updateMessage?: { id: string; action: StoredAction };
 }
@@ -154,10 +158,10 @@ function deny(lang: Lang, what: "admin" | "perm" | "others"): EngineReply {
     lang,
     what === "others"
       ? L(lang, {
-          en: "I can only see and change your own data. 🙏",
-          hi: "मैं सिर्फ़ आपका अपना डेटा देख और बदल सकती हूं। 🙏",
-          gu: "હું ફક્ત તમારો પોતાનો ડેટા જોઈ અને બદલી શકું છું. 🙏",
-          hn: "Main sirf aapka apna data dekh aur badal sakti hoon. 🙏",
+          en: "Other people's data (including the admin's) is private — I can only show and change your own. Ask me anything about your money 🙂",
+          hi: "दूसरे यूज़र्स (एडमिन भी) का डेटा प्राइवेट है — मैं सिर्फ़ आपका अपना डेटा दिखा और बदल सकती हूं। अपने पैसों के बारे में कुछ भी पूछिए 🙂",
+          gu: "બીજા યુઝર્સ (એડમિન પણ) નો ડેટા ખાનગી છે — હું ફક્ત તમારો પોતાનો ડેટા બતાવી અને બદલી શકું છું. તમારા પૈસા વિશે કંઈ પણ પૂછો 🙂",
+          hn: "Dusre users (admin bhi) ka data private hai — main sirf aapka apna data dikha aur badal sakti hoon. Apne paison ke baare mein kuch bhi poochiye 🙂",
         })
       : what === "admin"
         ? L(lang, {
@@ -239,12 +243,28 @@ async function loadUser(id: string): Promise<UserDoc | null> {
 
 type TargetResult = { ok: true; t: Target } | { ok: false; reply: EngineReply; options?: T.UserLite[] };
 
-async function resolveTarget(p: Parsed, inp: EngineInput, lang: Lang, wantsWrite: boolean): Promise<TargetResult> {
+function possessiveWord(p: Parsed): string | null {
+  for (const w of p.contentWords) {
+    const i = p.tokens.indexOf(w);
+    if (i < 0) continue;
+    if (POSSESSIVE.has(phonetic(p.tokens[i + 1] ?? "")) || /(નું|ના|ની|નો|નુ)$/.test(w) || (POSSESSIVE.has(phonetic(p.tokens[i - 1] ?? "")) && /^(of|for|user)$/.test(p.tokens[i - 1] ?? ""))) return w;
+  }
+  return null;
+}
+
+const MONEY_INTENTS: Intent[] = ["balance", "expense", "income", "savings", "compare", "top_categories", "largest", "average", "overview", "forecast"];
+
+async function resolveTarget(p: Parsed, inp: EngineInput, lang: Lang, wantsWrite: boolean, intent: Intent): Promise<TargetResult> {
   const { actor, perms, ctx } = inp;
   const isAdmin = actor.role === "admin";
   const selfT: Target = { scope: "self", owner: actor, who: whoOf(true, actor.name.split(" ")[0]) };
   if (!isAdmin) {
-    if (p.hits.platform) return { ok: false, reply: deny(lang, "others") };
+    // Normal users: only their own data. Asking about the admin / everyone / another user gets a clear, polite answer.
+    if (p.hits.platform || p.hits.adminWord || (p.hits.users && !p.hits.self && intent !== "profile")) return { ok: false, reply: deny(lang, "others") };
+    if (possessiveWord(p)) {
+      const { users } = await findMentionedUsers(p);
+      if (users.length && users.every((u) => u._id !== String(actor._id))) return { ok: false, reply: deny(lang, "others") };
+    }
     return { ok: true, t: selfT };
   }
   // admin
@@ -281,6 +301,10 @@ async function resolveTarget(p: Parsed, inp: EngineInput, lang: Lang, wantsWrite
     const owner = await loadUser(u._id);
     if (!owner) return { ok: true, t: selfT };
     return { ok: true, t: { scope: "user", owner, who: whoOf(false, owner.name) } };
+  }
+  // "total users ki income", "sab users ka kharcha" → the whole platform
+  if (!wantsWrite && p.hits.users && !p.hits.self && MONEY_INTENTS.includes(intent) && perms.includes("users.view")) {
+    return { ok: true, t: { scope: "platform", owner: actor, who: whoOf(false, "All users") } };
   }
   // A name-like word used possessively ("xyz ka balance") that matches nobody → tell the admin.
   const idx = mentioned ? p.tokens.indexOf(mentioned) : -1;
@@ -680,18 +704,177 @@ async function answerListUsers(lang: Lang): Promise<EngineReply> {
   return reply(lang, L(lang, { en: "The 10 newest users:", hi: "सबसे नए 10 यूज़र:", gu: "સૌથી નવા 10 યુઝર:", hn: "Sabse naye 10 users:" }), { cards: [card], suggestions: sug(lang, "admin") });
 }
 
-async function answerUserInfo(lang: Lang, t: Target, cur: string): Promise<EngineReply> {
+
+// ---------- overview ("mera hisaab batao", "how am I doing", "ravi ka is mahine ka hisaab") ----------
+async function answerOverview(lang: Lang, t: Target, cur: string, period: Period, today: string): Promise<EngineReply> {
+  const id = String(t.owner._id);
+  const [s, life, debts, goals] = await Promise.all([T.periodSums(id, period.start, period.end), T.lifetime(id), T.debtsOf(id), T.goalsOf(id, true)]);
+  const m = (n: number) => money(n, cur);
+  const pl = periodLabel(lang, period);
+  const left = s.income - s.expense;
+  const w = t.who;
+  const lines: string[] = [];
+  if (!w.self) lines.push(`${w.name} (${t.owner.email})`);
+  lines.push(
+    L(lang, {
+      en: `${cap(pl)}: income ${m(s.income)}, spent ${m(s.expense)} → ${left >= 0 ? "left" : "overspent"} ${m(Math.abs(left))}.`,
+      hi: `${pl}: आमदनी ${m(s.income)}, खर्च ${m(s.expense)} → ${left >= 0 ? "बचे" : "ज़्यादा खर्च"} ${m(Math.abs(left))}।`,
+      gu: `${pl}: આવક ${m(s.income)}, ખર્ચ ${m(s.expense)} → ${left >= 0 ? "બચ્યા" : "વધુ ખર્ચ"} ${m(Math.abs(left))}.`,
+      hn: `${cap(pl)}: income ${m(s.income)}, kharcha ${m(s.expense)} → ${left >= 0 ? "bache" : "zyada kharcha"} ${m(Math.abs(left))}.`,
+    }),
+  );
+  lines.push(L(lang, { en: `Total balance: ${signedMoney(life.balance, cur)}.`, hi: `कुल बैलेंस: ${signedMoney(life.balance, cur)}।`, gu: `કુલ બેલેન્સ: ${signedMoney(life.balance, cur)}.`, hn: `Total balance: ${signedMoney(life.balance, cur)}.` }));
+  const top = s.expenseByCategory[0];
+  if (top)
+    lines.push(
+      L(lang, {
+        en: `Most spent on ${catLabel(lang, top.category)}: ${m(top.total)}.`,
+        hi: `सबसे ज़्यादा खर्च ${catLabel(lang, top.category)} पर: ${m(top.total)}।`,
+        gu: `સૌથી વધુ ખર્ચ ${catLabel(lang, top.category)} પર: ${m(top.total)}.`,
+        hn: `Sabse zyada kharcha ${catLabel(lang, top.category)} pe: ${m(top.total)}.`,
+      }),
+    );
+  const active = debts.filter((d) => d.status === "active");
+  if (active.length) {
+    const next = [...active].sort((a, b) => a.dueDate.localeCompare(b.dueDate))[0];
+    const rem = debts.reduce((x, d) => x + d.remaining, 0);
+    lines.push(
+      L(lang, {
+        en: `Loans: ${m(rem)} left; next EMI “${next.title}” ${m(next.emi)} on ${dateLabel(lang, next.dueDate)}.`,
+        hi: `लोन: ${m(rem)} बाकी; अगली EMI “${next.title}” ${m(next.emi)}, ${dateLabel(lang, next.dueDate)}।`,
+        gu: `લોન: ${m(rem)} બાકી; આગલી EMI “${next.title}” ${m(next.emi)}, ${dateLabel(lang, next.dueDate)}.`,
+        hn: `Loan: ${m(rem)} baaki; agli EMI “${next.title}” ${m(next.emi)}, ${dateLabel(lang, next.dueDate)}.`,
+      }),
+    );
+  }
+  if (goals.length) {
+    const saved = goals.reduce((x, g) => x + g.current, 0);
+    const target = goals.reduce((x, g) => x + g.target, 0);
+    lines.push(
+      L(lang, {
+        en: `Goals: ${goals.length} open, ${m(saved)} saved of ${m(target)}.`,
+        hi: `गोल: ${goals.length} चालू, ${m(target)} में से ${m(saved)} जमा।`,
+        gu: `ગોલ: ${goals.length} ચાલુ, ${m(target)} માંથી ${m(saved)} જમા.`,
+        hn: `Goals: ${goals.length} active, ${m(target)} mein se ${m(saved)} jama.`,
+      }),
+    );
+  }
+  if (!s.incomeCount && !s.expenseCount && !debts.length && !goals.length)
+    lines.push(L(lang, { en: "No entries yet — tell me what you earn and spend, e.g. “salary 50000 received”.", hi: "अभी कोई एंट्री नहीं है — बताइए क्या कमाया और खर्च किया, जैसे “50000 सैलरी आई”।", gu: "હજી કોઈ એન્ટ્રી નથી — કહો શું કમાયા અને ખર્ચ્યું, જેમ કે “પગાર 50000 આવ્યો”.", hn: "Abhi koi entry nahi hai — bataiye kya kamaya aur kharch kiya, jaise “50000 salary aayi”." }));
+  const cards: Card[] = [
+    {
+      type: "stats",
+      items: [
+        { label: L(lang, { en: "Income", hi: "आमदनी", gu: "આવક", hn: "Income" }), value: m(s.income), tone: "pos" },
+        { label: L(lang, { en: "Spent", hi: "खर्च", gu: "ખર્ચ", hn: "Kharcha" }), value: m(s.expense), tone: "neg" },
+        { label: L(lang, { en: "Left", hi: "बचे", gu: "બચ્યા", hn: "Bache" }), value: signedMoney(left, cur), tone: left >= 0 ? "pos" : "neg" },
+      ],
+    },
+  ];
+  return reply(lang, lines.join("\n"), { speak: lines.slice(w.self ? 0 : 1, w.self ? 2 : 3).join(" "), cards, suggestions: sug(lang, "money") });
+}
+
+// ---------- profile / account details ("mera plan kya hai", "ravi ki details", "ravi ka email") ----------
+async function answerProfile(lang: Lang, t: Target, cur: string, p: Parsed, today: string): Promise<EngineReply> {
   const u = t.owner;
-  const life = await T.lifetime(String(u._id));
-  const plan = u.role === "admin" ? "Unlimited (admin)" : getPlan(u.plan).name;
-  const joined = dateLabel(lang, new Date(u.createdAt).toISOString().slice(0, 10));
+  const id = String(u._id);
+  const mp = thisMonth(today);
+  const [usage, life, month, debts, goals] = await Promise.all([getUsage(id), T.lifetime(id), T.periodSums(id, mp.start, mp.end), T.debtsOf(id), T.goalsOf(id, true)]);
+  const plan = planForUser(u);
+  const m = (n: number) => money(n, cur);
+  const d = (x?: Date | null) => (x ? dateLabel(lang, new Date(x).toISOString().slice(0, 10)) : L(lang, { en: "never", hi: "कभी नहीं", gu: "ક્યારેય નહીં", hn: "kabhi nahi" }));
+  const lbl = (t4: T4) => L(lang, t4);
+  const records = `${usage.financeRecords}${plan.maxFinanceRecords ? ` / ${plan.maxFinanceRecords}` : ""}`;
+  const items = [
+    { title: lbl({ en: "Name", hi: "नाम", gu: "નામ", hn: "Naam" }), value: u.name },
+    { title: "Email", value: u.email },
+    { title: lbl({ en: "Plan", hi: "प्लान", gu: "પ્લાન", hn: "Plan" }), value: `${plan.name}${u.role === "admin" ? " (admin)" : ""}` },
+    { title: lbl({ en: "Status", hi: "स्टेटस", gu: "સ્ટેટસ", hn: "Status" }), value: u.status },
+    { title: lbl({ en: "Member since", hi: "कब जुड़े", gu: "ક્યારે જોડાયા", hn: "Member since" }), value: d(u.createdAt) },
+    { title: lbl({ en: "Last login", hi: "आखिरी लॉगिन", gu: "છેલ્લું લૉગિન", hn: "Last login" }), value: d(u.lastLoginAt) },
+    { title: lbl({ en: "Records", hi: "एंट्री", gu: "એન્ટ્રી", hn: "Records" }), value: `${records} · ${usage.goals} ${lbl({ en: "goals", hi: "गोल", gu: "ગોલ", hn: "goals" })}` },
+    { title: lbl({ en: "Balance", hi: "बैलेंस", gu: "બેલેન્સ", hn: "Balance" }), value: signedMoney(life.balance, cur) },
+    { title: lbl({ en: "This month", hi: "इस महीने", gu: "આ મહિને", hn: "Is mahine" }), value: `+${m(month.income)} / −${m(month.expense)}` },
+    { title: lbl({ en: "Loans left", hi: "लोन बाकी", gu: "લોન બાકી", hn: "Loan baaki" }), value: m(debts.reduce((x, y) => x + y.remaining, 0)) },
+    { title: lbl({ en: "Open goals", hi: "चालू गोल", gu: "ચાલુ ગોલ", hn: "Active goals" }), value: String(goals.length) },
+  ];
+  // Lead with what was asked
+  const tk = p.tokens.join(" ");
+  const nm = t.who.self ? L(lang, { en: "Your", hi: "आपका", gu: "તમારું", hn: "Aapka" }) : L(lang, { en: `${u.name}'s`, hi: `${u.name} का`, gu: `${u.name}નું`, hn: `${u.name} ka` });
+  let head: string;
+  if (/mail|ईमेल|ઈમેલ/.test(tk)) head = `${nm} email: ${u.email}`;
+  else if (/login|लॉगिन|લૉગિન|લોગિન/.test(tk)) head = L(lang, { en: `${nm} last login: ${d(u.lastLoginAt)}`, hi: `${nm} आखिरी लॉगिन: ${d(u.lastLoginAt)}`, gu: `${nm} છેલ્લું લૉગિન: ${d(u.lastLoginAt)}`, hn: `${nm} last login: ${d(u.lastLoginAt)}` });
+  else if (p.hits.plan) head = L(lang, { en: `${nm} plan: ${plan.name} (${records} records used).`, hi: `${nm} प्लान: ${plan.name} (${records} एंट्री)।`, gu: `${nm} પ્લાન: ${plan.name} (${records} એન્ટ્રી).`, hn: `${nm} plan: ${plan.name} (${records} records).` });
+  else if (/naam|name|नाम|નામ/.test(tk) && t.who.self) head = L(lang, { en: `Your name is ${u.name}.`, hi: `आपका नाम ${u.name} है।`, gu: `તમારું નામ ${u.name} છે.`, hn: `Aapka naam ${u.name} hai.` });
+  else if (/record|एंट्री/.test(tk)) head = L(lang, { en: `${nm} records: ${records}.`, hi: `${nm} एंट्री: ${records}।`, gu: `${nm} એન્ટ્રી: ${records}.`, hn: `${nm} records: ${records}.` });
+  else
+    head = t.who.self
+      ? L(lang, { en: `Here are your account details, ${u.name.split(" ")[0]}:`, hi: `ये रही आपके अकाउंट की जानकारी:`, gu: `આ રહી તમારા એકાઉન્ટની માહિતી:`, hn: `Ye rahi aapke account ki details:` })
+      : L(lang, { en: `Everything about ${u.name}:`, hi: `${u.name} की पूरी जानकारी:`, gu: `${u.name} ની પૂરી માહિતી:`, hn: `${u.name} ki poori details:` });
+  return reply(lang, head, { cards: [{ type: "list", items }], suggestions: t.who.self ? sug(lang, "money") : sug(lang, "admin") });
+}
+
+// ---------- admin: who spent / earned the most ----------
+async function answerTopUsers(lang: Lang, cur: string, period: Period, p: Parsed): Promise<EngineReply> {
+  const earners = !!p.hits.income || !!p.incomeCategory;
+  const rows = earners ? await T.topEarners(period.start, period.end, 5) : await T.topSpenders(period.start, period.end, 5);
+  const pl = periodLabel(lang, period);
+  if (!rows.length) return reply(lang, L(lang, { en: `No entries ${pl}.`, hi: `${pl} कोई एंट्री नहीं है।`, gu: `${pl} કોઈ એન્ટ્રી નથી.`, hn: `${cap(pl)} koi entry nahi hai.` }));
+  const text = earners
+    ? L(lang, { en: `Top earner ${pl}: ${rows[0].name} — ${money(rows[0].total, cur)}.`, hi: `${pl} सबसे ज़्यादा आमदनी: ${rows[0].name} — ${money(rows[0].total, cur)}।`, gu: `${pl} સૌથી વધુ આવક: ${rows[0].name} — ${money(rows[0].total, cur)}.`, hn: `${cap(pl)} sabse zyada income: ${rows[0].name} — ${money(rows[0].total, cur)}.` })
+    : L(lang, { en: `Top spender ${pl}: ${rows[0].name} — ${money(rows[0].total, cur)}.`, hi: `${pl} सबसे ज़्यादा खर्च: ${rows[0].name} — ${money(rows[0].total, cur)}।`, gu: `${pl} સૌથી વધુ ખર્ચ: ${rows[0].name} — ${money(rows[0].total, cur)}.`, hn: `${cap(pl)} sabse zyada kharcha: ${rows[0].name} — ${money(rows[0].total, cur)}.` });
+  return reply(lang, text, { cards: [{ type: "list", items: rows.map((r, i) => ({ title: `${i + 1}. ${r.name}`, subtitle: r.email, value: money(r.total, cur), tone: earners ? ("pos" as const) : ("neg" as const) })) }], suggestions: sug(lang, "admin") });
+}
+
+// ---------- admin: user search ("free users kitne hain", "aaj kitne users ne login kiya", "admin kaun hai") ----------
+async function answerUsersQuery(lang: Lang, p: Parsed, today: string): Promise<EngineReply> {
+  const tk = ` ${p.tokens.join(" ")} `;
+  const f: T.UsersFilter = { sort: "new" };
+  const labels: string[] = [];
+  if (p.planId) {
+    f.plan = p.planId;
+    labels.push(getPlan(p.planId).name);
+  }
+  if (p.hits.adminWord) {
+    f.role = "admin";
+    labels.push("admin");
+  }
+  if (/ (disabled|blocked|band|बंद|બંધ) /.test(tk)) {
+    f.status = "disabled";
+    labels.push("disabled");
+  }
+  const days30 = new Date(parseYmd(today).getTime() - 29 * 86400000);
+  if (/ (inactive|निष्क्रिय) /.test(tk)) {
+    f.notLoggedInSince = days30;
+    labels.push(L(lang, { en: "inactive (no login in 30 days)", hi: "निष्क्रिय (30 दिन से लॉगिन नहीं)", gu: "નિષ્ક્રિય (30 દિવસથી લૉગિન નહીં)", hn: "inactive (30 din se login nahi)" }));
+  } else if (/ (active|login|logged|एक्टिव|લૉગિન|लॉगिन|એક્ટિવ) /.test(tk)) {
+    f.loggedInSince = p.period ? p.period.start : days30;
+    f.sort = "login";
+    labels.push(p.period ? L(lang, { en: `logged in ${periodLabel("en", p.period)}`, hi: `${periodLabel("hi", p.period)} लॉगिन`, gu: `${periodLabel("gu", p.period)} લૉગિન`, hn: `${periodLabel("hn", p.period)} login` }) : L(lang, { en: "active (30 days)", hi: "एक्टिव (30 दिन)", gu: "એક્ટિવ (30 દિવસ)", hn: "active (30 din)" }));
+  }
+  if (/ (old|oldest|purana|purane|पुराना|पुराने|જૂના|જૂનો) /.test(tk)) f.sort = "old";
+  else if (/ (new|newest|latest|naye|naya|नए|નવા) /.test(tk) && p.period) {
+    f.createdFrom = p.period.start;
+    f.createdTo = p.period.end;
+  }
+  const r = await T.usersQuery(f, 10);
+  const what = labels.length ? labels.join(", ") : L(lang, { en: "all", hi: "सभी", gu: "બધા", hn: "sabhi" });
+  const names = r.total > 0 && r.total <= 3 ? `: ${r.items.map((u) => u.name).join(", ")}` : "";
   const text = L(lang, {
-    en: `${u.name} (${u.email}): plan ${plan}, ${u.status}, joined ${joined}. Balance ${signedMoney(life.balance, cur)}.`,
-    hi: `${u.name} (${u.email}): प्लान ${plan}, स्टेटस ${u.status}, ${joined} को जुड़े। बैलेंस ${signedMoney(life.balance, cur)}।`,
-    gu: `${u.name} (${u.email}): પ્લાન ${plan}, સ્ટેટસ ${u.status}, ${joined} એ જોડાયા. બેલેન્સ ${signedMoney(life.balance, cur)}.`,
-    hn: `${u.name} (${u.email}): plan ${plan}, status ${u.status}, ${joined} ko join kiya. Balance ${signedMoney(life.balance, cur)}.`,
+    en: `${r.total} user${r.total === 1 ? "" : "s"} (${what})${names}.`,
+    hi: `${r.total} यूज़र (${what})${names}।`,
+    gu: `${r.total} યુઝર (${what})${names}.`,
+    hn: `${r.total} user${r.total === 1 ? "" : "s"} (${what})${names}.`,
   });
-  return reply(lang, text);
+  const card: Card = {
+    type: "list",
+    items: r.items.map((u) => ({
+      title: u.name,
+      subtitle: `${u.email} · ${u.role === "admin" ? "admin" : getPlan(u.plan).name}${u.status !== "active" ? " · disabled" : ""}`,
+      value: f.sort === "login" ? (u.lastLoginAt ? dateLabel(lang, new Date(u.lastLoginAt).toISOString().slice(0, 10)) : "—") : u.createdAt ? dateLabel(lang, new Date(u.createdAt).toISOString().slice(0, 10)) : "",
+    })),
+  };
+  return reply(lang, text, { cards: r.items.length ? [card] : [], suggestions: sug(lang, "admin") });
 }
 
 // ======================= actions =======================
@@ -1148,6 +1331,18 @@ const HELP: T4 = {
 };
 
 export async function respond(inp: EngineInput): Promise<EngineResult> {
+  // Voice: if the main guess isn't understood but one of the browser's other guesses is, use that one.
+  if (inp.alts?.length && !inp.ctx?.pending) {
+    const today = ymd(todayUTC());
+    if (parse(inp.text, today).intent === "unknown") {
+      const alt = inp.alts.slice(0, 3).find((a) => parse(a, today).intent !== "unknown");
+      if (alt) return { ...(await respondInner({ ...inp, text: alt })), usedText: alt };
+    }
+  }
+  return respondInner(inp);
+}
+
+async function respondInner(inp: EngineInput): Promise<EngineResult> {
   const today = ymd(todayUTC());
   const cur = inp.actor.currency || "INR";
   const ctx: AngelContext = { ...(inp.ctx ?? {}) };
@@ -1238,6 +1433,26 @@ export async function respond(inp: EngineInput): Promise<EngineResult> {
     (p.period || p.expenseCategory || p.incomeCategory || p.hits.otherPronoun || (inp.actor.role === "admin" && p.tokens.length <= 4 && p.contentWords.length > 0 && p.tokens.some((tk) => POSSESSIVE.has(phonetic(tk)))))
   )
     intent = ctx.lastIntent;
+  // best guesses before giving up
+  if (intent === "unknown") {
+    if (p.expenseCategory) intent = "expense";
+    else if (p.incomeCategory) intent = "income";
+    else if (p.period) intent = "overview";
+    else if (p.hits.question && (p.hits.self || p.tokens.length <= 3) && !p.amount) intent = "overview";
+  }
+  if (intent === "unknown" && p.amount && p.tokens.length <= 3) {
+    return {
+      reply: reply(lang, L(lang, {
+        en: `What was ${money(p.amount, cur)} for? Say for example “petrol ${p.amount}” or “salary ${p.amount} received”.`,
+        hi: `${money(p.amount, cur)} किस चीज़ के थे? जैसे बोलिए “पेट्रोल ${p.amount}” या “${p.amount} सैलरी आई”।`,
+        gu: `${money(p.amount, cur)} શેના હતા? જેમ કે બોલો “પેટ્રોલ ${p.amount}” અથવા “પગાર ${p.amount} આવ્યો”.`,
+        hn: `${money(p.amount, cur)} kis cheez ke the? Jaise boliye “petrol ${p.amount}” ya “${p.amount} salary aayi”.`,
+      })),
+      ctx,
+    };
+  }
+  if (intent === "top_users" && inp.actor.role !== "admin") intent = "top_categories";
+  if (intent === "users_query" && inp.actor.role !== "admin") return { reply: deny(lang, "others"), ctx };
   const period = p.period ?? (intent === ctx.lastIntent && !p.period ? unserial(ctx.lastPeriod) : null) ?? thisMonth(today);
   const category = p.expenseCategory ?? p.incomeCategory ?? (intent === ctx.lastIntent && p.intent === "unknown" ? ctx.lastCategory ?? null : null);
 
@@ -1248,6 +1463,7 @@ export async function respond(inp: EngineInput): Promise<EngineResult> {
   }
   if (intent === "identity") return { reply: reply(lang, L(lang, IDENTITY), { suggestions: sug(lang, "start") }), ctx };
   if (intent === "help") return { reply: reply(lang, L(lang, HELP), { speak: L(lang, { en: "I can answer questions about your money, give saving advice, and add entries for you. Here are some examples.", hi: "मैं आपके पैसों के सवालों का जवाब दे सकती हूं, बचत की सलाह दे सकती हूं और एंट्री जोड़ सकती हूं। ये रहे कुछ उदाहरण।", gu: "હું તમારા પૈસાના સવાલોના જવાબ આપી શકું, બચતની સલાહ આપી શકું અને એન્ટ્રી ઉમેરી શકું. આ રહ્યા થોડા ઉદાહરણ.", hn: "Main aapke paison ke sawaalon ka jawab de sakti hoon, bachat ki salah de sakti hoon aur entries add kar sakti hoon. Ye rahe kuch examples." }), suggestions: sug(lang, "start") }), ctx };
+  if (intent === "ack") return { reply: reply(lang, L(lang, { en: "🙂 Anything else you'd like to know?", hi: "🙂 और कुछ जानना है?", gu: "🙂 બીજું કંઈ જાણવું છે?", hn: "🙂 Aur kuch jaanna hai?" }), { suggestions: sug(lang, "money") }), ctx };
   if (intent === "thanks") return { reply: reply(lang, L(lang, { en: "Happy to help! 😊", hi: "खुशी हुई मदद करके! 😊", gu: "મદદ કરીને આનંદ થયો! 😊", hn: "Khushi hui madad karke! 😊" })), ctx };
   if (intent === "stop") return { reply: reply(lang, L(lang, { en: `Bye ${first}! Say “Angel active” whenever you need me.`, hi: `अलविदा ${first}! जब ज़रूरत हो, “एंजल एक्टिव” बोलिए।`, gu: `આવજો ${first}! જરૂર પડે ત્યારે “એન્જલ એક્ટિવ” બોલજો.`, hn: `Bye ${first}! Jab zaroorat ho, “Angel active” boliye.` })), ctx };
   if (intent === "yes" || intent === "no") return { reply: reply(lang, L(lang, { en: "Okay! What would you like to know?", hi: "ठीक है! क्या जानना चाहेंगे?", gu: "બરાબર! શું જાણવું છે?", hn: "Theek hai! Kya jaanna chahenge?" }), { suggestions: sug(lang, "start") }), ctx };
@@ -1258,7 +1474,7 @@ export async function respond(inp: EngineInput): Promise<EngineResult> {
   // ---------- 6. who is this about? ----------
   const ACTIONS: Intent[] = ["add_expense", "add_income", "goal_contribute", "pay_emi", "create_goal", "create_debt", "delete_last"];
   const wantsWrite = ACTIONS.includes(intent);
-  const platformIntent = intent === "platform_summary" || intent === "list_users";
+  const platformIntent = intent === "platform_summary" || intent === "list_users" || intent === "users_query" || intent === "top_users";
   if (platformIntent && inp.actor.role !== "admin") return { reply: deny(lang, p.hits.platform ? "others" : "admin"), ctx };
   if (platformIntent && !inp.perms.includes("users.view")) return { reply: deny(lang, "perm"), ctx };
 
@@ -1268,7 +1484,7 @@ export async function respond(inp: EngineInput): Promise<EngineResult> {
     return { reply: r.reply, ctx };
   }
 
-  const tr = platformIntent ? null : await resolveTarget(p, inp, lang, wantsWrite || intent === "change_plan");
+  const tr = platformIntent ? null : await resolveTarget(p, inp, lang, wantsWrite || intent === "change_plan", intent);
   if (tr && !tr.ok) return { reply: tr.reply, ctx };
   const t: Target = tr && tr.ok ? tr.t : { scope: "platform", owner: inp.actor, who: whoOf(false, "All users") };
   if (t.scope === "user") {
@@ -1358,17 +1574,33 @@ export async function respond(inp: EngineInput): Promise<EngineResult> {
       out = await answerListUsers(lang);
       break;
     case "user_info":
-      out = t.scope === "user" ? await answerUserInfo(lang, t, cur) : await answerBalance(lang, t, cur, today);
+    case "profile":
+      out = t.scope === "platform" ? await answerListUsers(lang) : await answerProfile(lang, t, cur, p, today);
+      break;
+    case "overview":
+      out = platform ? await answerPlatform(lang, cur, period) : await answerOverview(lang, t, cur, period, today);
+      break;
+    case "top_users":
+      out = await answerTopUsers(lang, cur, period, p);
+      break;
+    case "users_query":
+      out = await answerUsersQuery(lang, p, today);
       break;
     default: {
+      // Nothing matched: answer kindly, say what Angel can do, and offer questions that fit THIS user.
+      const debts = await T.debtsOf(String(inp.actor._id));
+      const personal = [
+        L(lang, { en: "How am I doing this month?", hi: "इस महीने मेरा हिसाब बताओ", gu: "આ મહિને મારો હિસાબ બતાવો", hn: "Is mahine ka hisaab batao" }),
+        debts.length ? L(lang, { en: "When is my next EMI?", hi: "अगली EMI कब है?", gu: "આગલી EMI ક્યારે છે?", hn: "Agli EMI kab hai?" }) : L(lang, { en: "Where did most of my money go?", hi: "सबसे ज़्यादा खर्च कहां हुआ?", gu: "સૌથી વધુ ખર્ચ ક્યાં થયો?", hn: "Sabse zyada kharcha kahan hua?" }),
+        inp.actor.role === "admin" ? L(lang, { en: "How many users are there?", hi: "कितने यूज़र हैं?", gu: "કેટલા યુઝર છે?", hn: "Kitne users hain?" }) : L(lang, { en: "How can I save more?", hi: "ज़्यादा बचत कैसे करूं?", gu: "વધુ બચત કેવી રીતે કરું?", hn: "Zyada bachat kaise karun?" }),
+      ];
       const text = L(lang, {
-        en: `Sorry ${first}, I didn't fully understand that. Try asking like this:`,
-        hi: `माफ़ कीजिए ${first}, मैं पूरी तरह समझ नहीं पाई। ऐसे पूछकर देखिए:`,
-        gu: `માફ કરશો ${first}, હું પૂરું સમજી શકી નહીં. આ રીતે પૂછી જુઓ:`,
-        hn: `Sorry ${first}, main poori tarah samajh nahi paayi. Aise poochkar dekhiye:`,
+        en: `I didn't quite get that, ${first}. I can tell you your balance, spending, savings, EMIs and goals, give saving advice, or add entries when you say things like “500 petrol”. Try one of these:`,
+        hi: `${first}, ये बात मैं ठीक से समझ नहीं पाई। मैं आपका बैलेंस, खर्च, बचत, EMI और गोल बता सकती हूं, बचत की सलाह दे सकती हूं, या “500 का पेट्रोल” जैसा बोलने पर एंट्री जोड़ सकती हूं। ये पूछकर देखिए:`,
+        gu: `${first}, આ વાત હું બરાબર સમજી નહીં. હું તમારું બેલેન્સ, ખર્ચ, બચત, EMI અને ગોલ કહી શકું, બચતની સલાહ આપી શકું, અથવા “500 નું પેટ્રોલ” જેવું બોલો તો એન્ટ્રી ઉમેરી શકું. આ પૂછી જુઓ:`,
+        hn: `${first}, ye baat main theek se samajh nahi paayi. Main aapka balance, kharcha, bachat, EMI aur goals bata sakti hoon, bachat ki salah de sakti hoon, ya “500 ka petrol” jaisa bolne pe entry add kar sakti hoon. Ye poochkar dekhiye:`,
       });
-      out = reply(lang, text, { suggestions: sug(lang, "start", ...(inp.actor.role === "admin" ? ["admin"] : [])).slice(0, 3) });
-      // keep context; nothing else to do
+      out = reply(lang, text, { speak: text.split(/[.।]/)[0], suggestions: personal });
       return { reply: out, ctx };
     }
   }

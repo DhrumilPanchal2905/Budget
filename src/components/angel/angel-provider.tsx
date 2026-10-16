@@ -5,13 +5,13 @@
 import dynamic from "next/dynamic";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { api } from "@/lib/client";
-import { isSleepPhrase, isWakePhrase, stripWake } from "@/lib/angel/wake";
+import { afterWake, isNameOnly, isSleepPhrase, isWakePhrase, startsWithName, stripWake } from "@/lib/angel/wake";
 import { forSpeech } from "@/lib/angel/i18n";
 import type { AngelLangPref, AngelMessageDTO, ActionView } from "@/lib/angel/types";
 import { useSession } from "../session";
 import { useToast } from "../toast";
 import { AngelOrb, type OrbState } from "./orb";
-import { chime, listen, speak, speechRecognitionSupported, startMicMeter, type MicMeter } from "./voice";
+import { captureUtterance, chime, listen, speak, speechRecognitionSupported, startMicMeter, type Heard, type MicMeter } from "./voice";
 
 const AngelPanel = dynamic(() => import("./angel-panel").then((m) => m.AngelPanel), { ssr: false });
 
@@ -21,8 +21,10 @@ export interface AngelSettings {
   voiceLang: VoiceLang;
   replyLang: AngelLangPref;
   speakReplies: boolean;
+  /** how long Angel waits after you stop talking before sending (ms) */
+  pauseMs: number;
 }
-const DEFAULTS: AngelSettings = { wake: false, voiceLang: "hi-IN", replyLang: "auto", speakReplies: true };
+const DEFAULTS: AngelSettings = { wake: false, voiceLang: "hi-IN", replyLang: "auto", speakReplies: true, pauseMs: 1200 };
 const KEY = "angel-settings-v1";
 
 function loadSettings(): AngelSettings {
@@ -49,7 +51,7 @@ interface AngelCtx {
   sending: boolean;
   settings: AngelSettings;
   updateSettings: (patch: Partial<AngelSettings>) => void;
-  send: (text: string, source?: "voice" | "text") => Promise<void>;
+  send: (text: string, source?: "voice" | "text", alts?: string[]) => Promise<void>;
   activate: () => void;
   endVoice: () => void;
   decide: (messageId: string, decision: "confirm" | "cancel" | "undo") => Promise<void>;
@@ -184,7 +186,7 @@ export function AngelProvider({ children }: { children: ReactNode }) {
     ttsRef.current = null;
   }, []);
 
-  const handleFinalRef = useRef<(t: string) => void>(() => {});
+  const handleFinalRef = useRef<(t: string, alts: string[]) => void>(() => {});
 
   const startCommandListening = useCallback(async () => {
     if (!sessionRef.current) return;
@@ -192,43 +194,45 @@ export function AngelProvider({ children }: { children: ReactNode }) {
     stopRec();
     setTranscript("");
     setMode("listening");
+    // Start listening right away; the loudness meter for the orb opens in parallel (never blocks recognition).
     if (!noMeter.current && !meterRef.current) {
-      const meter = await startMicMeter();
-      if (gen !== genRef.current || !sessionRef.current) {
-        meter?.stop(); // the session ended or restarted while the mic was opening → never leak it
-        return;
-      }
-      meterRef.current = meter;
+      void startMicMeter().then((meter) => {
+        if (gen !== genRef.current || !sessionRef.current || meterRef.current) meter?.stop(); // never leak a mic stream
+        else meterRef.current = meter;
+      });
     }
-    if (gen !== genRef.current || !sessionRef.current) return;
-    let gotFinal = false;
-    recRef.current = listen({
+    // Our own pause detection: you talk, stop for ~1.2 s, and it is sent automatically.
+    recRef.current = captureUtterance({
       lang: settingsRef.current.voiceLang,
-      continuous: false,
-      onText: (text, isFinal) => {
+      silenceMs: settingsRef.current.pauseMs || 1200,
+      onInterim: (text) => {
         setTranscript(text);
         if (!meterRef.current) levelRef.current = Math.min(1, 0.4 + Math.random() * 0.5);
-        if (isFinal && !gotFinal) {
-          gotFinal = true;
-          silenceCount.current = 0;
-          handleFinalRef.current(text);
-        }
+      },
+      onDone: (text, alts) => {
+        if (gen !== genRef.current || !sessionRef.current) return;
+        silenceCount.current = 0;
+        handleFinalRef.current(text, alts);
+      },
+      onNoSpeech: () => {
+        if (gen !== genRef.current || !sessionRef.current) return;
+        silenceCount.current += 1;
+        if (silenceCount.current >= 2) endVoice();
+        else void startCommandListening();
       },
       onError: (code) => {
         if (code === "not-allowed" || code === "service-not-allowed") {
           toast.error("Microphone blocked", "Allow microphone access for this site to talk to Angel.");
           endVoice();
         } else if (code === "audio-capture" && meterRef.current) {
-          // some phones can't share the mic between the meter and recognition → drop the meter
+          // some phones can't share the mic between the meter and recognition → drop the meter and retry
           noMeter.current = true;
           stopMeter();
+          void startCommandListening();
+        } else if (code === "language-not-supported") {
+          toast.error("Voice language not supported", "Choose another voice language in Angel settings.");
+          endVoice();
         }
-      },
-      onEnd: () => {
-        if (gotFinal || !sessionRef.current || gen !== genRef.current) return;
-        silenceCount.current += 1;
-        if (silenceCount.current >= 3) endVoice();
-        else void startCommandListening();
       },
     });
   }, [endVoice, toast]);
@@ -240,7 +244,7 @@ export function AngelProvider({ children }: { children: ReactNode }) {
   };
 
   const send = useCallback(
-    async (raw: string, source: "voice" | "text" = "text") => {
+    async (raw: string, source: "voice" | "text" = "text", alts: string[] = []) => {
       const text = raw.trim();
       if (!text || sendingRef.current) return; // one message at a time per chat
       sendingRef.current = true;
@@ -252,7 +256,7 @@ export function AngelProvider({ children }: { children: ReactNode }) {
       try {
         const { data } = await api<{ conversation: { id: string }; messages: AngelMessageDTO[]; updated: { id: string; action: ActionView | null } | null; speak: string; lang: string }>("/api/angel/chat", {
           method: "POST",
-          body: { message: text, conversationId: convRef.current, source, lang: settingsRef.current.replyLang },
+          body: { message: text, conversationId: convRef.current, source, lang: settingsRef.current.replyLang, ...(alts.length ? { alts: alts.slice(0, 3) } : {}) },
         });
         setConversationId(data.conversation.id);
         convRef.current = data.conversation.id;
@@ -280,19 +284,20 @@ export function AngelProvider({ children }: { children: ReactNode }) {
     [speakThen, startCommandListening, endVoice],
   );
 
-  handleFinalRef.current = (t: string) => {
+  handleFinalRef.current = (t: string, alts: string[]) => {
     stopRec();
     stopMeter();
     if (isSleepPhrase(t)) {
       endVoice(true);
       return;
     }
-    const cmd = isWakePhrase(t) ? stripWake(t) : t;
-    if (!cmd.trim()) {
+    const clean = (x: string) => (isWakePhrase(x) ? afterWake(x) || stripWake(x) : x).trim();
+    const cmd = clean(t);
+    if (!cmd || isNameOnly(t)) {
       void startCommandListening();
       return;
     }
-    void send(cmd, "voice");
+    void send(cmd, "voice", alts.map(clean).filter((a) => a && a !== cmd));
   };
 
   const activate = useCallback(
@@ -338,13 +343,17 @@ export function AngelProvider({ children }: { children: ReactNode }) {
       wakeRef.current = listen({
         lang: settingsRef.current.voiceLang,
         continuous: true,
-        onText: (text, isFinal) => {
+        onText: (h: Heard) => {
           backoff = 300;
           hardErrors = 0;
-          if (!isWakePhrase(text)) return;
+          // look at what was said most recently (+ the browser's alternative guesses)
+          const tail = (x: string) => x.split(" ").slice(-10).join(" ");
+          const candidates = [h.text, tail(h.full), ...h.alts.map(tail)];
+          const hit = candidates.find((c) => isWakePhrase(c) || (h.isFinal && (isNameOnly(c) || startsWithName(c))));
+          if (!hit) return;
           wakeRef.current?.stop();
           wakeRef.current = null;
-          const rest = isFinal ? stripWake(text) : "";
+          const rest = h.isFinal ? afterWake(hit) : "";
           void activate(rest.split(" ").length >= 2 ? rest : undefined);
         },
         onError: (code) => {
