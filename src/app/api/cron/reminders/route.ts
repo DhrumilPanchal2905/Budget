@@ -6,8 +6,10 @@ import { notifyUser } from "@/lib/notify";
 import { todayUTC } from "@/lib/analytics";
 import { formatMoney, fromMinor } from "@/lib/money";
 import { audit } from "@/lib/audit";
+import { runRecurring } from "@/lib/recurring";
+import { ensureIndexes } from "@/lib/db";
 
-// Daily Vercel Cron job (see vercel.json): EMI due-date reminders.
+// Daily Vercel Cron job (see vercel.json): EMI due-date reminders + auto-repeat entries + index check.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -50,6 +52,13 @@ export async function GET(req: NextRequest) {
     await Debt.updateOne({ _id: d._id }, { $set: { lastReminderFor: due } });
     sent++;
   }
-  await audit({ actor: null, action: "system.cron.reminders", metadata: { sent } });
-  return NextResponse.json({ success: true, sent });
+  let recurring = { created: 0, skipped: 0 };
+  try {
+    recurring = await runRecurring(today);
+  } catch (err) {
+    console.error("[cron] recurring failed", (err as Error).message);
+  }
+  await ensureIndexes(false).catch(() => null);
+  await audit({ actor: null, action: "system.cron.reminders", metadata: { sent, recurring } });
+  return NextResponse.json({ success: true, sent, recurring });
 }

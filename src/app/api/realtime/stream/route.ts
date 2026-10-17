@@ -4,6 +4,7 @@ import { resolveSession } from "@/lib/auth";
 import { SESSION_COOKIE } from "@/lib/env";
 import { RealtimeEvent } from "@/lib/models";
 import { userChannel } from "@/lib/realtime";
+import { keyFor, seal } from "@/lib/secure-channel";
 
 // Server-Sent Events stream — Vercel-compatible realtime without a persistent Socket.IO server.
 // Each connection lives up to ~55s, then the browser's EventSource reconnects automatically and
@@ -30,6 +31,9 @@ export async function GET(req: NextRequest) {
   const lastMs = last ? Number(last.split("-")[0]) : NaN;
   let since = Number.isFinite(lastMs) && Date.now() - lastMs < 120_000 ? lastMs : Date.now();
 
+  // Encrypted channel: EventSource cannot send headers, so the tab's PUBLIC key comes in the URL (?k=).
+  const key = keyFor(req.nextUrl.searchParams.get("k"));
+  const data = (v: unknown) => (key ? seal(key, JSON.stringify(v ?? {})) : JSON.stringify(v ?? {}));
   const encoder = new TextEncoder();
   const seen = new Set<string>();
   let closed = false;
@@ -48,7 +52,7 @@ export async function GET(req: NextRequest) {
         }
       };
       send(`retry: 1500\n\n`);
-      send(`event: ready\ndata: ${JSON.stringify({ channels: channels.length })}\n\n`);
+      send(`event: ready\ndata: ${data({ channels: channels.length })}\n\n`);
 
       const deadline = Date.now() + LIFETIME_MS;
       let lastPing = Date.now();
@@ -64,7 +68,7 @@ export async function GET(req: NextRequest) {
             seen.add(id);
             const ms = new Date(e.createdAt).getTime();
             if (ms > since) since = ms;
-            send(`id: ${ms}-${id}\nevent: ${e.event}\ndata: ${JSON.stringify(e.payload ?? {})}\n\n`);
+            send(`id: ${ms}-${id}\nevent: ${e.event}\ndata: ${data(e.payload)}\n\n`);
           }
         } catch (err) {
           console.error("[sse] poll failed", (err as Error).message);

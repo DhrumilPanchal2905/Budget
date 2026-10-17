@@ -55,7 +55,7 @@ export const POST = route({ auth: false }, async ({ req, ip }) => {
   await pk.save();
   await User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } });
 
-  const token = await createSession(String(user._id), ip, req.headers.get("user-agent") || "", { remember: true, method: "passkey" });
+  const token = await createSession(String(user._id), ip, req.headers.get("user-agent") || "", { remember: true, method: "passkey", headers: req.headers });
   await audit({ actor: user, action: "auth.login", resource: "user", resourceId: String(user._id), targetUserId: String(user._id), metadata: { method: "passkey", device: pk.deviceName }, ip });
 
   const res = NextResponse.json({

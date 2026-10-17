@@ -1,8 +1,9 @@
 import { route, ok, parseBody } from "@/lib/api";
-import { AuditLog, Expense, Income, Notification, Session, User, isObjectId, oid, type UserDoc } from "@/lib/models";
+import { AuditLog, Expense, Income, Notification, Session, User, Visit, isObjectId, oid, type UserDoc } from "@/lib/models";
+import { placeLabel } from "@/lib/geo";
 import { adminUpdateUserSchema } from "@/lib/validation";
 import { hashPassword } from "@/lib/auth";
-import { adminUserView, assertNotLastAdmin, deleteUserCompletely } from "@/lib/users";
+import { adminUserView, assertCanManage, assertNotLastAdmin, deleteUserCompletely } from "@/lib/users";
 import { getUsage } from "@/lib/finance";
 import { DEFAULT_ADMIN_PERMISSIONS, effectivePermissions, isAdminPermission, type Permission } from "@/lib/permissions";
 import { audit } from "@/lib/audit";
@@ -22,11 +23,6 @@ async function loadTarget(id: unknown): Promise<UserDoc> {
   return u;
 }
 
-/** An admin may not modify/delete another admin who holds admin permissions the actor lacks (prevents takeover via password reset). */
-function assertCanManage(target: UserDoc, actorPerms: Permission[]) {
-  if (target.role !== "admin") return;
-  if ((target.permissions ?? []).some((p) => isAdminPermission(p) && !actorPerms.includes(p as Permission))) throw Errors.forbidden();
-}
 
 /** Full user inspection: profile, plan, permissions, finance totals, monthly chart, notifications, activity. */
 export const GET = route({ admin: true, perms: ["users.view"] }, async ({ params, perms }) => {
@@ -44,7 +40,7 @@ export const GET = route({ admin: true, perms: ["users.view"] }, async ({ params
       { $group: { _id: { y: { $year: "$date" }, m: { $month: "$date" } }, t: { $sum: "$amount" } } },
     ]);
 
-  const [usage, overall, incM, expM, notifications, activity, sessions] = await Promise.all([
+  const [usage, overall, incM, expM, notifications, activity, sessions, sessionList, visits] = await Promise.all([
     getUsage(id),
     canFinance ? getOverall(id) : Promise.resolve(null),
     canFinance ? monthAgg(Income) : Promise.resolve([]),
@@ -54,6 +50,8 @@ export const GET = route({ admin: true, perms: ["users.view"] }, async ({ params
       ? AuditLog.find({ $or: [{ targetUserId: userId }, { actorId: userId }] }).sort({ createdAt: -1 }).limit(40).lean()
       : Promise.resolve([]),
     Session.countDocuments({ userId, expiresAt: { $gt: new Date() } }),
+    Session.find({ userId, expiresAt: { $gt: new Date() } }).sort({ lastSeenAt: -1 }).limit(10).select("createdAt lastSeenAt userAgent method country region city ip").lean(),
+    Visit.find({ userId }).sort({ createdAt: -1 }).limit(15).select("createdAt path city region country countryCode device browser os").lean(),
   ]);
 
   const toMap = (rows: { _id: { y: number; m: number }; t: number }[]) =>
@@ -66,6 +64,15 @@ export const GET = route({ admin: true, perms: ["users.view"] }, async ({ params
     plan: planForUser(target),
     usage,
     activeSessions: sessions,
+    whereabouts: {
+      lastSeenAt: target.lastSeenAt ?? target.lastLoginAt ?? null,
+      lastLocation: target.lastLocation ? placeLabel(target.lastLocation) : null,
+      emailVerified: target.emailVerified !== false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      sessions: sessionList.map((x: any) => ({ id: String(x._id), createdAt: x.createdAt, lastSeenAt: x.lastSeenAt, method: x.method, place: placeLabel(x), device: String(x.userAgent || "").slice(0, 120) })),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      visits: visits.map((v: any) => ({ id: String(v._id), at: v.createdAt, path: v.path, place: placeLabel(v), code: v.countryCode ?? null, device: `${v.browser ?? ""} · ${v.os ?? ""}` })),
+    },
     totals: overall?.totals ?? null,
     monthly: canFinance
       ? months.map((k) => ({ month: k, label: monthLabel(k), income: fromMinor(im.get(k) ?? 0), expense: fromMinor(em.get(k) ?? 0) }))

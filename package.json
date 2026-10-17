@@ -1,6 +1,6 @@
 {
   "name": "budget-pro",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "description": "Budget Pro — professional personal finance SaaS (Next.js + MongoDB, Vercel-ready)",
   "scripts": {
@@ -10,10 +10,10 @@
     "typecheck": "tsc --noEmit",
     "vapid": "node scripts/generate-vapid.mjs",
     "make-admin": "node scripts/make-admin.mjs",
-    "test:angel": "npx --yes tsx scripts/test-angel.ts"
+    "test:angel": "npx --yes tsx scripts/test-angel.ts && npx --yes tsx scripts/eval-angel.ts"
   },
   "engines": {
-    "node": ">=18.18.0"
+    "node": ">=20.9.0"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.0.2",
@@ -23,6 +23,7 @@
     "lucide-react": "^0.468.0",
     "mongoose": "^8.9.5",
     "next": "^15.5.0",
+    "nodemailer": "^6.9.16",
     "pusher": "^5.2.0",
     "pusher-js": "^8.4.0",
     "react": "^19.1.0",
@@ -37,6 +38,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/nodemailer": "^6.4.17",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/web-push": "^3.6.4",

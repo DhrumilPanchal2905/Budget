@@ -1,4 +1,6 @@
 // Browser-side API helper. Cookies are HttpOnly → JS never sees the session token.
+// Every request and response body is end-to-end encrypted (AES-256-GCM over an ECDH key) — see secure-client.ts.
+import { openText, resetSecureChannel, sealText, secureChannel } from "./secure-client";
 
 export class ApiClientError extends Error {
   status: number;
@@ -17,28 +19,57 @@ export interface ApiResult<T> {
 
 export async function api<T = unknown>(
   path: string,
-  opts: { method?: string; body?: unknown; signal?: AbortSignal } = {},
+  opts: { method?: string; body?: unknown; signal?: AbortSignal; keepalive?: boolean } = {},
+  retried = false,
 ): Promise<ApiResult<T>> {
+  const chan = typeof window !== "undefined" && path.startsWith("/api/") ? await secureChannel() : null;
+  const headers: Record<string, string> = {};
+  let body: string | undefined;
+  if (opts.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+    body = JSON.stringify(opts.body);
+  }
+  if (chan) {
+    headers["x-bp-key"] = chan.pub;
+    if (body !== undefined) body = JSON.stringify({ __e: await sealText(chan, body) });
+  }
   let res: Response;
   try {
     res = await fetch(path, {
       method: opts.method || "GET",
       credentials: "same-origin",
-      headers: opts.body !== undefined ? { "Content-Type": "application/json" } : undefined,
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      headers: Object.keys(headers).length ? headers : undefined,
+      body,
       signal: opts.signal,
+      keepalive: opts.keepalive,
       cache: "no-store",
     });
   } catch {
     throw new ApiClientError(0, "Network error — check your connection and try again.");
   }
-  let json: { success?: boolean; message?: string; data?: T; errors?: Record<string, string> } = {};
+  if (res.headers.get("x-bp-rekey") === "1") {
+    // The server couldn't open our encrypted body (it has a new key after a deploy) — nothing ran, so retry is safe.
+    resetSecureChannel();
+    if (!retried) return api<T>(path, opts, true);
+  }
+  let json: { success?: boolean; message?: string; data?: T; errors?: Record<string, string>; __e?: string } = {};
   try {
     json = await res.json();
   } catch {
     /* non-JSON */
   }
-  if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/api/auth/login") && !path.startsWith("/api/auth/register") && !path.startsWith("/api/auth/passkey/login")) {
+  if (chan && typeof json.__e === "string") {
+    try {
+      json = JSON.parse(await openText(chan, json.__e));
+    } catch {
+      // The server key changed (new deployment with a new secret) → renegotiate once.
+      resetSecureChannel();
+      // Only safe (read-only) requests are retried — a write may already have happened on the server.
+      if (!retried && (!opts.method || opts.method === "GET")) return api<T>(path, opts, true);
+      throw new ApiClientError(0, "Secure connection failed — please reload the page.");
+    }
+  }
+  if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/api/auth/login") && !path.startsWith("/api/auth/register") && !path.startsWith("/api/auth/passkey/login") && !path.startsWith("/api/auth/password/") && !path.startsWith("/api/track")) {
     window.location.href = "/api/auth/logout?reason=expired";
   }
   if (!res.ok || json.success === false) {

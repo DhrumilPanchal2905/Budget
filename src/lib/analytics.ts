@@ -2,6 +2,7 @@ import type { Model, PipelineStage } from "mongoose";
 import { Debt, Expense, Goal, Income, Notification, oid } from "./models";
 import { fromMinor, pct } from "./money";
 import { APP_TIMEZONE } from "./env";
+import { goalInsight } from "./goals";
 
 // All aggregation happens in MongoDB on integer minor units → exact totals, no floating drift.
 // Dates are stored as UTC midnight of the chosen calendar day, so UTC grouping = calendar grouping.
@@ -267,6 +268,7 @@ export async function getOverall(ownerId: string) {
       current: fromMinor(g.currentAmount),
       progress: Math.min(100, pct(g.currentAmount, g.targetAmount)),
       targetDate: new Date(g.targetDate).toISOString().slice(0, 10),
+      insight: goalInsight(g),
     })),
   };
 }
@@ -294,7 +296,7 @@ export async function getDashboard(ownerId: string) {
     { $limit: 8 },
   ];
 
-  const [month, lifetimeIncome, lifetimeExpense, incMonths, expMonths, debts, goals, upcoming, topGoals, recent, unread, latestNotifs, threeMonthIncome] =
+  const [month, lifetimeIncome, lifetimeExpense, incMonths, expMonths, debts, goals, upcoming, topGoals, recent, unread, latestNotifs, threeMonthIncome, activeGoals] =
     await Promise.all([
       getMonthly(ownerId, key),
       sumAmount(Income, { userId }),
@@ -309,6 +311,7 @@ export async function getDashboard(ownerId: string) {
       Notification.countDocuments({ userId, read: false }),
       Notification.find({ userId }).sort({ createdAt: -1 }).limit(5).lean(),
       sumAmount(Income, { userId, date: { $gte: monthRange(shiftMonth(key, -3)).start, $lt: monthRange(key).start } }),
+      Goal.find({ userId, status: "active" }).select("targetAmount currentAmount targetDate createdAt status").limit(100).lean(),
     ]);
 
   const trend = sixMonths.map((k) => ({
@@ -325,6 +328,10 @@ export async function getDashboard(ownerId: string) {
   const emiRatio = refIncome ? pct(debts.emiActive, refIncome) : null;
   const savingsRate = monthIncomeMinor ? month.savingsRate : null;
   const goalProgress = goals.target ? pct(goals.saved, goals.target) : null;
+  // Goals: being ON TRACK (vs where you should be by today) matters more than raw progress.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const goalStates = (activeGoals as any[]).map((g) => goalInsight(g).status);
+  const goalsOnTrack = goalStates.length ? pct(goalStates.filter((st) => st === "on_track" || st === "ahead" || st === "achieved").length, goalStates.length) : null;
 
   let score: number | null = null;
   if (monthIncomeMinor || month.expense || debts.count || goals.count) {
@@ -332,7 +339,8 @@ export async function getDashboard(ownerId: string) {
     if (savingsRate !== null) score += savingsRate >= 20 ? 25 : savingsRate >= 10 ? 15 : savingsRate >= 0 ? 5 : -20;
     else if (month.expense > 0) score -= 15;
     if (emiRatio !== null) score += emiRatio === 0 ? 15 : emiRatio <= 20 ? 12 : emiRatio <= 40 ? 3 : -15;
-    if (goalProgress !== null) score += goalProgress >= 50 ? 10 : goalProgress >= 20 ? 5 : 0;
+    if (goalsOnTrack !== null) score += goalsOnTrack >= 75 ? 10 : goalsOnTrack >= 40 ? 5 : -5;
+    else if (goalProgress !== null) score += goalProgress >= 50 ? 10 : goalProgress >= 20 ? 5 : 0;
     score = Math.max(0, Math.min(100, Math.round(score)));
   }
 
@@ -347,6 +355,8 @@ export async function getDashboard(ownerId: string) {
       incomeChange: month.previous.incomeChange,
       expenseChange: month.previous.expenseChange,
       totalSavings: fromMinor(lifetimeIncome - lifetimeExpense),
+      // money set aside in goals is still part of your balance — "free" is what's left to spend
+      freeBalance: fromMinor(lifetimeIncome - lifetimeExpense - goals.saved),
       goalSaved: fromMinor(goals.saved),
       goalTarget: fromMinor(goals.target),
       totalDebt: fromMinor(debts.remainingActive),
@@ -360,6 +370,7 @@ export async function getDashboard(ownerId: string) {
       emiRatio,
       expenseRatio: monthIncomeMinor ? pct(Math.round(month.expense * 100), monthIncomeMinor) : null,
       goalProgress,
+      goalsOnTrack,
     },
     trend,
     expenseByCategory: month.expenseByCategory.slice(0, 6),
@@ -383,6 +394,7 @@ export async function getDashboard(ownerId: string) {
       current: fromMinor(g.currentAmount),
       progress: Math.min(100, pct(g.currentAmount, g.targetAmount)),
       targetDate: new Date(g.targetDate).toISOString().slice(0, 10),
+      insight: goalInsight(g),
     })),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     recent: recent.map((r: any) => ({

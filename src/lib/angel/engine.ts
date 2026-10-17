@@ -3,10 +3,14 @@
 // Actions (add expense, add income, goal contribution, EMI payment, new goal/loan, delete, create user, change plan)
 // reuse the SAME server functions as the app — so plan limits, validation, audit log, realtime refresh and
 // notifications all apply exactly as if the user clicked the buttons.
-import { AngelMessage, Debt, Expense, Goal, User, isObjectId, oid, type UserDoc } from "../models";
+import { AngelMessage, Budget, Debt, Expense, Goal, GoalContribution, Income, Session, User, isObjectId, oid, type UserDoc } from "../models";
 import type { Permission } from "../permissions";
 import { DEFAULT_USER_PERMISSIONS, isAdminPermission } from "../permissions";
-import { contributeGoal, createRecord, deleteRecord, getUsage, payDebt, requiredPerms } from "../finance";
+import { contributeGoal, createRecord, deleteRecord, getUsage, goalInsight, goalPaces, payDebt, requiredPerms, updateRecord } from "../finance";
+import { budgetReport, checkBudgetAlerts, TOTAL } from "../budgets";
+import { deleteUserCompletely, assertNotLastAdmin, assertCanManage } from "../users";
+import { needsWantsOf } from "../finance-rules";
+import { KB } from "./brain/knowledge";
 import { getDashboard, todayUTC } from "../analytics";
 import { generateInsights } from "../insights";
 import { audit } from "../audit";
@@ -43,7 +47,7 @@ type SerialPeriod = { kind: Period["kind"]; start: string; end: string; n?: numb
 interface Pending {
   kind: "confirm" | "slot";
   action: { kind: ActionKind; ownerId: string; payload: Record<string, unknown> };
-  slot?: "amount" | "goal" | "debt" | "email" | "user" | "emi";
+  slot?: "amount" | "goal" | "debt" | "email" | "user" | "emi" | "entry" | "category";
   options?: { id: string; label: string }[];
   messageId?: string;
   /** when the question was asked (ms) — unanswered confirmations expire after 10 minutes */
@@ -132,7 +136,8 @@ const SUGGEST: Record<string, T4[]> = {
   money: [
     { en: "Where did most of my money go?", hi: "सबसे ज़्यादा खर्च कहां हुआ?", gu: "સૌથી વધુ ખર્ચ ક્યાં થયો?", hn: "Sabse zyada kharcha kahan hua?" },
     { en: "Compare with last month", hi: "पिछले महीने से तुलना करो", gu: "ગયા મહિના સાથે સરખામણી કરો", hn: "Pichle mahine se compare karo" },
-    { en: "How much will I save by month end?", hi: "महीने के अंत तक कितना बचेगा?", gu: "મહિનાના અંતે કેટલું બચશે?", hn: "Mahine ke end tak kitna bachega?" },
+    { en: "Why did my spending go up?", hi: "खर्च क्यों बढ़ा?", gu: "ખર્ચ કેમ વધ્યો?", hn: "Kharcha kyu badha?" },
+    { en: "Am I over budget?", hi: "क्या बजट पार हुआ?", gu: "બજેટ પાર થયું?", hn: "Budget cross hua kya?" },
   ],
   action: [
     { en: "Undo", hi: "वापस लो (Undo)", gu: "પાછું કરો (Undo)", hn: "Undo karo" },
@@ -140,10 +145,12 @@ const SUGGEST: Record<string, T4[]> = {
   ],
   advice: [
     { en: "Can I afford a ₹50,000 phone?", hi: "क्या मैं ₹50,000 का फोन ले सकता हूं?", gu: "શું હું ₹50,000 નો ફોન લઈ શકું?", hn: "Kya main ₹50,000 ka phone le sakta hun?" },
-    { en: "Show my goals", hi: "मेरे गोल दिखाओ", gu: "મારા ગોલ બતાવો", hn: "Mere goals dikhao" },
+    { en: "Are my goals on track?", hi: "मेरे गोल सही चल रहे हैं?", gu: "મારા ગોલ બરાબર ચાલે છે?", hn: "Mere goals on track hain?" },
+    { en: "Give me suggestions", hi: "मुझे सुझाव दो", gu: "મને સૂચનો આપો", hn: "Mujhe suggestions do" },
   ],
   admin: [
     { en: "How many users are there?", hi: "कितने यूज़र हैं?", gu: "કેટલા યુઝર છે?", hn: "Kitne users hain?" },
+    { en: "How many visitors today?", hi: "आज कितने विज़िटर आए?", gu: "આજે કેટલા વિઝિટર આવ્યા?", hn: "Aaj kitne visitors aaye?" },
     { en: "Total spending of all users this month", hi: "इस महीने सबका कुल खर्च", gu: "આ મહિને બધાનો કુલ ખર્ચ", hn: "Is mahine sabka total kharcha" },
   ],
 };
@@ -568,9 +575,10 @@ async function answerDebts(lang: Lang, t: Target, cur: string, today: string): P
   return reply(lang, text, { cards: [card], suggestions: sug(lang, "advice") });
 }
 
-async function answerGoals(lang: Lang, t: Target, cur: string, today: string): Promise<EngineReply> {
-  const goals = await T.goalsOf(String(t.owner._id));
-  if (!goals.length)
+async function answerGoals(lang: Lang, t: Target, cur: string, today: string, words: string[] = []): Promise<EngineReply> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const docs: any[] = await Goal.find({ userId: t.owner._id, status: { $ne: "cancelled" } }).sort({ status: 1, targetDate: 1 }).limit(30).lean();
+  if (!docs.length)
     return reply(
       lang,
       L(lang, {
@@ -580,20 +588,51 @@ async function answerGoals(lang: Lang, t: Target, cur: string, today: string): P
         hn: "Abhi koi saving goal nahi hai. Jaise boliye: “bike ke liye March tak 1 lakh ka goal banao”.",
       }),
     );
-  const m = (n: number) => money(n, cur);
-  const items = goals.slice(0, 6).map((g) => {
-    const left = Math.max(0, g.target - g.current);
-    const months = Math.max(1, Math.round((parseYmd(g.targetDate).getTime() - parseYmd(today).getTime()) / (30.44 * 86400000)));
-    const perMonth = left > 0 && g.status !== "achieved" ? `${m(Math.ceil(left / months))}/${L(lang, { en: "mo", hi: "महीना", gu: "મહિનો", hn: "mahina" })}` : "✓";
-    return { title: g.name, subtitle: `${m(g.current)} / ${m(g.target)} · ${dateLabel(lang, g.targetDate)} · ${perMonth}`, value: `${Math.min(100, Math.round((g.current / g.target) * 100))}%`, tone: (g.status === "achieved" ? "pos" : "neutral") as "pos" | "neutral" };
-  });
-  const saved = goals.reduce((s, g) => s + g.current, 0);
-  const target = goals.reduce((s, g) => s + g.target, 0);
+  const paces = await goalPaces(docs.map((d) => d._id));
+  const m = (n: number) => money(Math.round(n), cur);
+  const rows = docs.map((d) => ({ id: String(d._id), name: d.name as string, target: fromMinor(d.targetAmount), current: fromMinor(d.currentAmount), targetDate: new Date(d.targetDate).toISOString().slice(0, 10), gi: goalInsight(d, paces.get(String(d._id)) ?? null) }));
+  const ST: Record<string, T4> = {
+    achieved: { en: "achieved ✓", hi: "पूरा ✓", gu: "પૂરું ✓", hn: "poora ✓" },
+    ahead: { en: "ahead of schedule", hi: "समय से आगे", gu: "સમય કરતાં આગળ", hn: "time se aage" },
+    on_track: { en: "on track", hi: "सही रास्ते पर", gu: "સાચા માર્ગે", hn: "on track" },
+    behind: { en: "behind schedule", hi: "समय से पीछे", gu: "સમય કરતાં પાછળ", hn: "time se peeche" },
+    overdue: { en: "deadline passed", hi: "तारीख निकल गई", gu: "તારીખ વીતી ગઈ", hn: "date nikal gayi" },
+    not_started: { en: "not started", hi: "शुरू नहीं हुआ", gu: "શરૂ નથી થયું", hn: "shuru nahi hua" },
+    paused: { en: "paused", hi: "रुका हुआ", gu: "અટકેલું", hn: "paused" },
+    cancelled: { en: "cancelled", hi: "रद्द", gu: "રદ", hn: "cancelled" },
+  };
+  const focus = words.length ? matchByName(rows, (g) => g.name, words) : [];
+  if (focus.length === 1) {
+    const g = focus[0];
+    const gi = g.gi;
+    const pctNow = g.target ? Math.round((g.current / g.target) * 100) : 0;
+    const text = L(lang, {
+      en: `“${g.name}”: ${m(g.current)} of ${m(g.target)} (${pctNow}%) — ${L(lang, ST[gi.status])}.
+${gi.status === "achieved" ? "🎉 Done!" : `To finish by ${dateLabel(lang, g.targetDate)} you need ${m(gi.requiredMonthly)}/month for ${Math.ceil(gi.monthsLeft) || 1} month(s). You've been adding about ${m(gi.monthlyPace)}/month${gi.projectedDate ? `, so at this pace you'll finish around ${dateLabel(lang, gi.projectedDate)}` : " — start contributing to see a finish date"}. By now you'd ideally be at ${gi.expectedProgress}%.`}`,
+      hi: `“${g.name}”: ${m(g.target)} में से ${m(g.current)} (${pctNow}%) — ${L(lang, ST[gi.status])}।
+${gi.status === "achieved" ? "🎉 पूरा हो गया!" : `${dateLabel(lang, g.targetDate)} तक पूरा करने के लिए ${Math.ceil(gi.monthsLeft) || 1} महीने तक हर महीने ${m(gi.requiredMonthly)} चाहिए। आप लगभग ${m(gi.monthlyPace)}/महीना डाल रहे हैं${gi.projectedDate ? `, इसी रफ़्तार से ${dateLabel(lang, gi.projectedDate)} के आसपास पूरा होगा` : " — पैसे डालना शुरू करें तो तारीख दिखेगी"}। अब तक आदर्श रूप से ${gi.expectedProgress}% होना चाहिए था।`}`,
+      gu: `“${g.name}”: ${m(g.target)} માંથી ${m(g.current)} (${pctNow}%) — ${L(lang, ST[gi.status])}.
+${gi.status === "achieved" ? "🎉 પૂરું થઈ ગયું!" : `${dateLabel(lang, g.targetDate)} સુધી પૂરું કરવા ${Math.ceil(gi.monthsLeft) || 1} મહિના સુધી દર મહિને ${m(gi.requiredMonthly)} જોઈએ. તમે આશરે ${m(gi.monthlyPace)}/મહિનો નાખો છો${gi.projectedDate ? `, આ ઝડપે ${dateLabel(lang, gi.projectedDate)} આસપાસ પૂરું થશે` : " — પૈસા નાખવાનું શરૂ કરો તો તારીખ દેખાશે"}. અત્યાર સુધીમાં આદર્શ રીતે ${gi.expectedProgress}% હોવું જોઈએ.`}`,
+      hn: `“${g.name}”: ${m(g.target)} mein se ${m(g.current)} (${pctNow}%) — ${L(lang, ST[gi.status])}.
+${gi.status === "achieved" ? "🎉 Poora ho gaya!" : `${dateLabel(lang, g.targetDate)} tak poora karne ke liye ${Math.ceil(gi.monthsLeft) || 1} mahine tak har mahine ${m(gi.requiredMonthly)} chahiye. Aap lagbhag ${m(gi.monthlyPace)}/mahina daal rahe hain${gi.projectedDate ? `, isi raftaar se ${dateLabel(lang, gi.projectedDate)} ke aas-paas poora hoga` : " — paise daalna shuru kijiye to date dikhegi"}. Ab tak ideally ${gi.expectedProgress}% hona chahiye tha.`}`,
+    });
+    return reply(lang, text, { suggestions: [L(lang, { en: `Put 2000 in ${g.name}`, hi: `${g.name} में 2000 डालो`, gu: `${g.name} માં 2000 નાખો`, hn: `${g.name} mein 2000 daalo` }), ...sug(lang, "advice")].slice(0, 3) });
+  }
+  const items = rows.slice(0, 8).map((g) => ({
+    title: g.name,
+    subtitle: `${m(g.current)} / ${m(g.target)} · ${L(lang, ST[g.gi.status])}${g.gi.status !== "achieved" && g.gi.requiredMonthly ? ` · ${m(g.gi.requiredMonthly)}${M3(lang)}` : ""}`,
+    value: `${Math.min(100, Math.round((g.current / g.target) * 100))}%`,
+    tone: (g.gi.status === "achieved" || g.gi.status === "ahead" || g.gi.status === "on_track" ? "pos" : g.gi.status === "behind" || g.gi.status === "overdue" ? "neg" : "neutral") as "pos" | "neg" | "neutral",
+  }));
+  const saved = rows.reduce((x, g) => x + g.current, 0);
+  const target = rows.reduce((x, g) => x + g.target, 0);
+  const behind = rows.filter((g) => g.gi.status === "behind" || g.gi.status === "overdue" || g.gi.status === "not_started");
+  const needAll = rows.filter((g) => g.gi.status !== "achieved").reduce((x, g) => x + g.gi.requiredMonthly, 0);
   const text = L(lang, {
-    en: `${goals.length} goal(s): ${m(saved)} saved of ${m(target)} (${pctStr((saved / target) * 100)}). The per-month figure shows what's needed to finish on time.`,
-    hi: `${goals.length} गोल: ${m(target)} में से ${m(saved)} जमा (${pctStr((saved / target) * 100)})। हर गोल के आगे लिखा है कि समय पर पूरा करने के लिए हर महीने कितना चाहिए।`,
-    gu: `${goals.length} ગોલ: ${m(target)} માંથી ${m(saved)} જમા (${pctStr((saved / target) * 100)}). દરેક ગોલ સામે લખ્યું છે કે સમયસર પૂરું કરવા દર મહિને કેટલું જોઈએ.`,
-    hn: `${goals.length} goal: ${m(target)} mein se ${m(saved)} jama (${pctStr((saved / target) * 100)}). Har goal ke aage likha hai ki time pe poora karne ke liye har mahine kitna chahiye.`,
+    en: `${rows.length} goal(s): ${m(saved)} saved of ${m(target)} (${pctStr((saved / target) * 100)}). To hit every deadline you need about ${m(needAll)}/month in total.${behind.length ? ` Behind: ${behind.map((g) => g.name).join(", ")}.` : " Everything is on track 👍"}`,
+    hi: `${rows.length} गोल: ${m(target)} में से ${m(saved)} जमा (${pctStr((saved / target) * 100)})। सारी तारीखें पूरी करने के लिए कुल लगभग ${m(needAll)}/महीना चाहिए।${behind.length ? ` पीछे चल रहे: ${behind.map((g) => g.name).join(", ")}।` : " सब सही रास्ते पर 👍"}`,
+    gu: `${rows.length} ગોલ: ${m(target)} માંથી ${m(saved)} જમા (${pctStr((saved / target) * 100)}). બધી તારીખો પૂરી કરવા કુલ આશરે ${m(needAll)}/મહિનો જોઈએ.${behind.length ? ` પાછળ: ${behind.map((g) => g.name).join(", ")}.` : " બધું સાચા માર્ગે 👍"}`,
+    hn: `${rows.length} goal: ${m(target)} mein se ${m(saved)} jama (${pctStr((saved / target) * 100)}). Saari dates poori karne ke liye total lagbhag ${m(needAll)}/mahina chahiye.${behind.length ? ` Peeche: ${behind.map((g) => g.name).join(", ")}.` : " Sab on track 👍"}`,
   });
   return reply(lang, text, { cards: [{ type: "list", items }], suggestions: sug(lang, "advice") });
 }
@@ -618,7 +657,7 @@ async function answerHealth(lang: Lang, t: Target): Promise<EngineReply> {
 }
 
 async function answerInsights(lang: Lang, t: Target, cur: string): Promise<EngineReply> {
-  const r = await generateInsights(String(t.owner._id), { advanced: true, currency: cur });
+  const r = await generateInsights(String(t.owner._id), { advanced: true, currency: cur, lang });
   const top = r.insights.slice(0, 4);
   if (!top.length) return reply(lang, L(lang, { en: "No insights yet — add a few entries first.", hi: "अभी कोई इनसाइट नहीं — पहले कुछ एंट्री जोड़िए।", gu: "હજી કોઈ ઇનસાઇટ નથી — પહેલાં થોડી એન્ટ્રી ઉમેરો.", hn: "Abhi koi insight nahi — pehle kuch entries add kijiye." }));
   const head = L(lang, { en: "Here's what stands out:", hi: "ये बातें ध्यान देने लायक हैं:", gu: "આ વાતો ધ્યાન આપવા જેવી છે:", hn: "Ye baatein dhyan dene layak hain:" });
@@ -792,6 +831,13 @@ async function answerProfile(lang: Lang, t: Target, cur: string, p: Parsed, toda
     { title: lbl({ en: "Status", hi: "स्टेटस", gu: "સ્ટેટસ", hn: "Status" }), value: u.status },
     { title: lbl({ en: "Member since", hi: "कब जुड़े", gu: "ક્યારે જોડાયા", hn: "Member since" }), value: d(u.createdAt) },
     { title: lbl({ en: "Last login", hi: "आखिरी लॉगिन", gu: "છેલ્લું લૉગિન", hn: "Last login" }), value: d(u.lastLoginAt) },
+    ...(!t.who.self || u.role === "admin"
+      ? [
+          { title: lbl({ en: "Last seen", hi: "आखिरी बार देखा", gu: "છેલ્લે જોયા", hn: "Last seen" }), value: d(u.lastSeenAt ?? u.lastLoginAt) },
+          { title: lbl({ en: "Location (approx.)", hi: "लोकेशन (लगभग)", gu: "લોકેશન (આશરે)", hn: "Location (approx.)" }), value: [u.lastLocation?.city, u.lastLocation?.region, u.lastLocation?.country].filter(Boolean).join(", ") || "—" },
+          { title: lbl({ en: "Email verified", hi: "ईमेल वेरिफाइड", gu: "ઈમેલ વેરિફાઇડ", hn: "Email verified" }), value: u.emailVerified === false ? "✗" : "✓" },
+        ]
+      : []),
     { title: lbl({ en: "Records", hi: "एंट्री", gu: "એન્ટ્રી", hn: "Records" }), value: `${records} · ${usage.goals} ${lbl({ en: "goals", hi: "गोल", gu: "ગોલ", hn: "goals" })}` },
     { title: lbl({ en: "Balance", hi: "बैलेंस", gu: "બેલેન્સ", hn: "Balance" }), value: signedMoney(life.balance, cur) },
     { title: lbl({ en: "This month", hi: "इस महीने", gu: "આ મહિને", hn: "Is mahine" }), value: `+${m(month.income)} / −${m(month.expense)}` },
@@ -877,6 +923,262 @@ async function answerUsersQuery(lang: Lang, p: Parsed, today: string): Promise<E
   return reply(lang, text, { cards: r.items.length ? [card] : [], suggestions: sug(lang, "admin") });
 }
 
+
+// ======================= reasoning answers (new) =======================
+const M3 = (lang: Lang) => L(lang, { en: "/mo", hi: "/महीना", gu: "/મહિનો", hn: "/mahina" });
+
+/** "Why did my spending go up?" — compares like-for-like days, finds the categories and entries behind it. */
+async function answerExplain(lang: Lang, t: Target, cur: string, today: string): Promise<EngineReply> {
+  const id = String(t.owner._id);
+  const now = parseYmd(today);
+  const day = now.getUTCDate();
+  const curStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const curEnd = new Date(now.getTime() + 86400000);
+  const prevStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  const prevDays = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0)).getUTCDate();
+  const prevEnd = new Date(prevStart.getTime() + Math.min(day, prevDays) * 86400000); // same number of days → fair
+  const [a, b] = await Promise.all([T.periodSums(id, curStart, curEnd), T.periodSums(id, prevStart, prevEnd)]);
+  const m = (n: number) => money(Math.round(n), cur);
+  if (!a.expenseCount && !b.expenseCount) return answerFlow("expense", lang, t, cur, thisMonth(today), null);
+  const diff = a.expense - b.expense;
+  const pctCh = b.expense ? Math.round((diff / b.expense) * 1000) / 10 : null;
+  const prevMap = new Map(b.expenseByCategory.map((r) => [r.category, r.total]));
+  const curMap = new Map(a.expenseByCategory.map((r) => [r.category, r.total]));
+  const cats = [...new Set([...curMap.keys(), ...prevMap.keys()])].map((c) => ({ c, d: (curMap.get(c) ?? 0) - (prevMap.get(c) ?? 0) }));
+  const ups = cats.filter((x) => x.d > 0).sort((x, y) => y.d - x.d).slice(0, 3);
+  const downs = cats.filter((x) => x.d < 0).sort((x, y) => x.d - y.d).slice(0, 2);
+  const lines: string[] = [];
+  const dir = diff >= 0;
+  lines.push(
+    L(lang, {
+      en: `This month so far (${day} days) you spent ${m(a.expense)} vs ${m(b.expense)} in the same ${day} days last month — ${dir ? "up" : "down"} ${m(Math.abs(diff))}${pctCh !== null ? ` (${dir ? "+" : "−"}${Math.abs(pctCh)}%)` : ""}.`,
+      hi: `इस महीने अब तक (${day} दिन) ${m(a.expense)} खर्च हुए, जबकि पिछले महीने के इन्हीं ${day} दिनों में ${m(b.expense)} — यानी ${m(Math.abs(diff))} ${dir ? "ज़्यादा" : "कम"}${pctCh !== null ? ` (${dir ? "+" : "−"}${Math.abs(pctCh)}%)` : ""}।`,
+      gu: `આ મહિને અત્યાર સુધી (${day} દિવસ) ${m(a.expense)} ખર્ચ થયો, જ્યારે ગયા મહિનાના આ જ ${day} દિવસમાં ${m(b.expense)} — એટલે ${m(Math.abs(diff))} ${dir ? "વધુ" : "ઓછો"}${pctCh !== null ? ` (${dir ? "+" : "−"}${Math.abs(pctCh)}%)` : ""}.`,
+      hn: `Is mahine ab tak (${day} din) ${m(a.expense)} kharch hue, jabki pichle mahine ke inhi ${day} dino mein ${m(b.expense)} — yaani ${m(Math.abs(diff))} ${dir ? "zyada" : "kam"}${pctCh !== null ? ` (${dir ? "+" : "−"}${Math.abs(pctCh)}%)` : ""}.`,
+    }),
+  );
+  const cards: Card[] = [];
+  if (ups.length) {
+    lines.push(L(lang, { en: "What pushed it up:", hi: "किस वजह से बढ़ा:", gu: "શેના કારણે વધ્યો:", hn: "Kis wajah se badha:" }));
+    const items: { title: string; subtitle?: string; value?: string; tone?: "pos" | "neg" | "neutral" }[] = [];
+    for (const u of ups) {
+      const tops = await T.topTransactions(id, curStart, curEnd, u.c, 2);
+      const eg = tops.map((x) => `${x.title} ${m(x.amount)}`).join(", ");
+      lines.push(`• ${catLabel(lang, u.c)} +${m(u.d)}${eg ? ` — ${eg}` : ""}`);
+      items.push({ title: catLabel(lang, u.c), subtitle: eg || undefined, value: `+${m(u.d)}`, tone: "neg" });
+    }
+    cards.push({ type: "list", title: L(lang, { en: "Biggest increases", hi: "सबसे बड़ी बढ़त", gu: "સૌથી મોટો વધારો", hn: "Sabse bada badhav" }), items });
+  }
+  if (downs.length) lines.push(L(lang, { en: `You spent less on ${downs.map((d) => `${catLabel(lang, d.c)} (−${m(-d.d)})`).join(", ")}.`, hi: `${downs.map((d) => `${catLabel(lang, d.c)} (−${m(-d.d)})`).join(", ")} पर कम खर्च हुआ।`, gu: `${downs.map((d) => `${catLabel(lang, d.c)} (−${m(-d.d)})`).join(", ")} પર ઓછો ખર્ચ થયો.`, hn: `${downs.map((d) => `${catLabel(lang, d.c)} (−${m(-d.d)})`).join(", ")} pe kam kharcha hua.` }));
+  if (dir && ups[0]) {
+    lines.push(L(lang, {
+      en: `💡 Setting a ${catLabel(lang, ups[0].c)} budget would stop this repeating — say “${ups[0].c} budget ${Math.round((prevMap.get(ups[0].c) ?? curMap.get(ups[0].c) ?? 0) * 1.1 / 100) * 100 || 1000}”.`,
+      hi: `💡 ${catLabel(lang, ups[0].c)} का बजट रखने से ये दोबारा नहीं होगा — बोलिए “${ups[0].c} budget ${Math.round((prevMap.get(ups[0].c) ?? curMap.get(ups[0].c) ?? 0) * 1.1 / 100) * 100 || 1000}”।`,
+      gu: `💡 ${catLabel(lang, ups[0].c)} નું બજેટ રાખવાથી આ ફરી નહીં થાય — કહો “${ups[0].c} budget ${Math.round((prevMap.get(ups[0].c) ?? curMap.get(ups[0].c) ?? 0) * 1.1 / 100) * 100 || 1000}”.`,
+      hn: `💡 ${catLabel(lang, ups[0].c)} ka budget rakhne se ye dobara nahi hoga — boliye “${ups[0].c} budget ${Math.round((prevMap.get(ups[0].c) ?? curMap.get(ups[0].c) ?? 0) * 1.1 / 100) * 100 || 1000}”.`,
+    }));
+  }
+  return reply(lang, lines.join("\n"), { speak: lines.slice(0, 3).join(" "), cards, suggestions: sug(lang, "advice", "money") });
+}
+
+/** Budget status (all, or one category) — with what you can still spend per day. */
+async function answerBudgets(lang: Lang, t: Target, cur: string, category: string | null): Promise<EngineReply> {
+  const r = await budgetReport(String(t.owner._id));
+  const m = (n: number) => money(n, cur);
+  const all = [...(r.total ? [r.total] : []), ...r.items];
+  const label = (c: string) => (c === TOTAL ? L(lang, { en: "Whole month", hi: "पूरा महीना", gu: "આખો મહિનો", hn: "Poora mahina" }) : catLabel(lang, c));
+  if (!all.length) {
+    const sg = r.suggestions.slice(0, 3);
+    const text = L(lang, {
+      en: `No budgets set yet.${sg.length ? ` Based on your last 3 months I'd suggest: ${sg.map((x) => `${catLabel(lang, x.category)} ${m(x.suggested)}`).join(", ")}.` : ""} Say for example “food budget 5000” and I'll track it and warn you at 80% and 100%.`,
+      hi: `अभी कोई बजट नहीं है।${sg.length ? ` पिछले 3 महीनों के हिसाब से मेरा सुझाव: ${sg.map((x) => `${catLabel(lang, x.category)} ${m(x.suggested)}`).join(", ")}।` : ""} जैसे बोलिए “खाने का बजट 5000” — मैं ट्रैक करूंगी और 80% व 100% पर बताऊंगी।`,
+      gu: `હજી કોઈ બજેટ નથી.${sg.length ? ` છેલ્લા 3 મહિનાના આધારે મારું સૂચન: ${sg.map((x) => `${catLabel(lang, x.category)} ${m(x.suggested)}`).join(", ")}.` : ""} જેમ કે કહો “ખાવાનું બજેટ 5000” — હું ટ્રેક કરીશ અને 80% અને 100% પર જણાવીશ.`,
+      hn: `Abhi koi budget nahi hai.${sg.length ? ` Pichle 3 mahine ke hisaab se mera suggestion: ${sg.map((x) => `${catLabel(lang, x.category)} ${m(x.suggested)}`).join(", ")}.` : ""} Jaise boliye “food budget 5000” — main track karungi aur 80% aur 100% pe bataungi.`,
+    });
+    return reply(lang, text, { suggestions: sg.length ? [`${sg[0].category} budget ${sg[0].suggested}`, ...sug(lang, "money")].slice(0, 3) : sug(lang, "money") });
+  }
+  const focus = category ? all.find((x) => x.category === category) : null;
+  if (category && !focus) {
+    return reply(lang, L(lang, { en: `There's no budget for ${catLabel(lang, category)} yet. Say “${category} budget 5000” to set one.`, hi: `${catLabel(lang, category)} का अभी कोई बजट नहीं है। सेट करने के लिए बोलिए “${category} budget 5000”।`, gu: `${catLabel(lang, category)} નું હજી કોઈ બજેટ નથી. સેટ કરવા કહો “${category} budget 5000”.`, hn: `${catLabel(lang, category)} ka abhi koi budget nahi hai. Set karne ke liye boliye “${category} budget 5000”.` }));
+  }
+  const one = (x: (typeof all)[number]) =>
+    x.status === "over"
+      ? L(lang, { en: `${label(x.category)}: over by ${m(-x.remaining)} (${m(x.spent)} of ${m(x.limit)}).`, hi: `${label(x.category)}: ${m(-x.remaining)} से पार (${m(x.limit)} में से ${m(x.spent)})।`, gu: `${label(x.category)}: ${m(-x.remaining)} થી પાર (${m(x.limit)} માંથી ${m(x.spent)}).`, hn: `${label(x.category)}: ${m(-x.remaining)} se cross (${m(x.limit)} mein se ${m(x.spent)}).` })
+      : L(lang, { en: `${label(x.category)}: ${m(x.remaining)} left of ${m(x.limit)} (${x.pct}% used) — about ${m(x.perDay)}/day for ${r.daysLeft} days.${x.projectedOver ? ` ⚠️ At this pace you'll reach ${m(x.projected)}.` : ""}`, hi: `${label(x.category)}: ${m(x.limit)} में से ${m(x.remaining)} बचे (${x.pct}% इस्तेमाल) — ${r.daysLeft} दिन के लिए लगभग ${m(x.perDay)}/दिन।${x.projectedOver ? ` ⚠️ इसी रफ़्तार से ${m(x.projected)} हो जाएगा।` : ""}`, gu: `${label(x.category)}: ${m(x.limit)} માંથી ${m(x.remaining)} બાકી (${x.pct}% વપરાયું) — ${r.daysLeft} દિવસ માટે આશરે ${m(x.perDay)}/દિવસ.${x.projectedOver ? ` ⚠️ આ ઝડપે ${m(x.projected)} થઈ જશે.` : ""}`, hn: `${label(x.category)}: ${m(x.limit)} mein se ${m(x.remaining)} bache (${x.pct}% use) — ${r.daysLeft} din ke liye lagbhag ${m(x.perDay)}/din.${x.projectedOver ? ` ⚠️ Isi raftaar se ${m(x.projected)} ho jayega.` : ""}` });
+  if (focus) return reply(lang, one(focus), { suggestions: sug(lang, "money") });
+  const over = all.filter((x) => x.status === "over").length;
+  const warn = all.filter((x) => x.status === "warn").length;
+  const head = L(lang, {
+    en: over ? `${over} budget${over > 1 ? "s are" : " is"} over the limit${warn ? `, ${warn} close to it` : ""}.` : warn ? `All within limits, but ${warn} ${warn > 1 ? "are" : "is"} close.` : "All budgets are within limits 👍",
+    hi: over ? `${over} बजट लिमिट से पार हैं${warn ? `, ${warn} लिमिट के करीब` : ""}।` : warn ? `सब लिमिट में हैं, पर ${warn} करीब हैं।` : "सारे बजट लिमिट के अंदर हैं 👍",
+    gu: over ? `${over} બજેટ લિમિટથી પાર છે${warn ? `, ${warn} લિમિટની નજીક` : ""}.` : warn ? `બધા લિમિટમાં છે, પણ ${warn} નજીક છે.` : "બધાં બજેટ લિમિટની અંદર છે 👍",
+    hn: over ? `${over} budget limit se cross hain${warn ? `, ${warn} limit ke kareeb` : ""}.` : warn ? `Sab limit mein hain, par ${warn} kareeb hain.` : "Saare budgets limit ke andar hain 👍",
+  });
+  const card: Card = { type: "bars", title: L(lang, { en: "Budget used", hi: "बजट इस्तेमाल", gu: "બજેટ વપરાશ", hn: "Budget used" }), items: all.slice(0, 8).map((x) => ({ label: label(x.category), value: Math.min(100, x.pct), display: `${m(x.spent)} / ${m(x.limit)}` })) };
+  return reply(lang, [head, ...all.slice(0, 4).map(one)].join("\n"), { speak: head, cards: [card], suggestions: sug(lang, "money") });
+}
+
+/** 50/30/20 for the current month (or last month when this month has no income yet). */
+async function answer503020(lang: Lang, t: Target, cur: string, today: string): Promise<EngineReply> {
+  const id = String(t.owner._id);
+  let p = thisMonth(today);
+  let s = await T.periodSums(id, p.start, p.end);
+  if (!s.income) {
+    p = { kind: "lastMonth", start: new Date(Date.UTC(p.start.getUTCFullYear(), p.start.getUTCMonth() - 1, 1)), end: p.start };
+    s = await T.periodSums(id, p.start, p.end);
+  }
+  const m = (n: number) => money(Math.round(n), cur);
+  if (!s.income) return reply(lang, L(lang, KB.rule503020.answer) + "\n" + L(lang, { en: "Add your income and I'll show your own split.", hi: "अपनी आमदनी जोड़िए, फिर मैं आपका हिसाब दिखाऊंगी।", gu: "તમારી આવક ઉમેરો, પછી હું તમારો હિસાબ બતાવીશ.", hn: "Apni income add kijiye, phir main aapka split dikhaungi." }));
+  const nw = needsWantsOf(s.expenseByCategory);
+  const saved = s.income - nw.needs - nw.wants;
+  const pc = (x: number) => Math.round((x / s.income) * 1000) / 10;
+  const pl = periodLabel(lang, p);
+  const tips: string[] = [];
+  if (pc(nw.wants) > 30) tips.push(L(lang, { en: `Wants are above 30% — trimming them to 30% frees ${m(nw.wants - s.income * 0.3)}.`, hi: `शौक 30% से ऊपर हैं — 30% तक लाने से ${m(nw.wants - s.income * 0.3)} बचेंगे।`, gu: `શોખ 30% થી ઉપર છે — 30% સુધી લાવવાથી ${m(nw.wants - s.income * 0.3)} બચશે.`, hn: `Shauk 30% se upar hain — 30% tak laane se ${m(nw.wants - s.income * 0.3)} bachenge.` }));
+  if (pc(nw.needs) > 50) tips.push(L(lang, { en: "Needs are above 50% — usually rent/EMIs; avoid new EMIs and review bills.", hi: "ज़रूरतें 50% से ऊपर हैं — अक्सर किराया/EMI; नई EMI से बचें और बिल जांचें।", gu: "જરૂરિયાતો 50% થી ઉપર છે — મોટાભાગે ભાડું/EMI; નવી EMI ટાળો અને બિલ તપાસો.", hn: "Zaroorat 50% se upar hai — aksar rent/EMI; nayi EMI se bachiye aur bills check kijiye." }));
+  if (pc(saved) >= 20) tips.push(L(lang, { en: "Savings at or above 20% — excellent 👏", hi: "बचत 20% या ज़्यादा — बहुत बढ़िया 👏", gu: "બચત 20% કે વધુ — ખૂબ સરસ 👏", hn: "Bachat 20% ya zyada — bahut badhiya 👏" }));
+  const text = [
+    L(lang, { en: `${cap(pl)} (income ${m(s.income)}):`, hi: `${pl} (आमदनी ${m(s.income)}):`, gu: `${pl} (આવક ${m(s.income)}):`, hn: `${cap(pl)} (income ${m(s.income)}):` }),
+    `• ${L(lang, { en: "Needs", hi: "ज़रूरतें", gu: "જરૂરિયાત", hn: "Zaroorat" })}: ${m(nw.needs)} (${pc(nw.needs)}% · ideal 50%)`,
+    `• ${L(lang, { en: "Wants", hi: "शौक", gu: "શોખ", hn: "Shauk" })}: ${m(nw.wants)} (${pc(nw.wants)}% · ideal 30%)`,
+    `• ${L(lang, { en: "Savings & investments", hi: "बचत व निवेश", gu: "બચત અને રોકાણ", hn: "Bachat & investment" })}: ${signedMoney(Math.round(saved), cur)} (${pc(saved)}% · ideal 20%)`,
+    ...tips,
+  ].join("\n");
+  const card: Card = { type: "bars", items: [
+    { label: L(lang, { en: "Needs", hi: "ज़रूरतें", gu: "જરૂરિયાત", hn: "Zaroorat" }), value: Math.max(0, pc(nw.needs)), display: `${pc(nw.needs)}%` },
+    { label: L(lang, { en: "Wants", hi: "शौक", gu: "શોખ", hn: "Shauk" }), value: Math.max(0, pc(nw.wants)), display: `${pc(nw.wants)}%` },
+    { label: L(lang, { en: "Savings", hi: "बचत", gu: "બચત", hn: "Bachat" }), value: Math.max(0, pc(saved)), display: `${pc(saved)}%` },
+  ] };
+  return reply(lang, text, { cards: [card], suggestions: sug(lang, "advice") });
+}
+
+async function answerEmergency(lang: Lang, t: Target, cur: string, today: string): Promise<EngineReply> {
+  const st = await T.advisorStats(String(t.owner._id), today);
+  const m = (n: number) => money(Math.round(n), cur);
+  const base = L(lang, { en: "An emergency fund covers 3–6 months of essential spending (6+ if your income is irregular or you support family). Keep it safe and quick to access — a savings account, sweep FD or liquid fund — not in stocks.", hi: "इमरजेंसी फंड में 3–6 महीने का ज़रूरी खर्च होना चाहिए (आमदनी अनियमित हो या परिवार निर्भर हो तो 6+)। इसे सुरक्षित और तुरंत मिलने वाली जगह रखें — सेविंग्स खाता, स्वीप FD या लिक्विड फंड — शेयर में नहीं।", gu: "ઇમરજન્સી ફંડમાં 3–6 મહિનાનો જરૂરી ખર્ચ હોવો જોઈએ (આવક અનિયમિત હોય કે પરિવાર નિર્ભર હોય તો 6+). તેને સુરક્ષિત અને તરત મળે એવી જગ્યાએ રાખો — સેવિંગ્સ ખાતું, સ્વીપ FD કે લિક્વિડ ફંડ — શેરમાં નહીં.", hn: "Emergency fund mein 3–6 mahine ka zaroori kharcha hona chahiye (income irregular ho ya family nirbhar ho to 6+). Ise safe aur turant milne wali jagah rakhiye — savings account, sweep FD ya liquid fund — shares mein nahi." });
+  if (!st.avgExpense) return reply(lang, base, { suggestions: sug(lang, "advice") });
+  const months = Math.max(0, st.balance) / st.avgExpense;
+  const lo = st.avgExpense * 3;
+  const hi = st.avgExpense * 6;
+  const gap = Math.max(0, lo - st.balance);
+  const mine = L(lang, {
+    en: `For you: average spending is ${m(st.avgExpense)}/month, so the target is ${m(lo)}–${m(hi)}. Your balance ${m(st.balance)} covers about ${Math.round(months * 10) / 10} months.${gap > 0 ? ` You need ${m(gap)} more for the 3-month minimum${st.avgIncome > st.avgExpense ? ` — about ${Math.ceil(gap / (st.avgIncome - st.avgExpense))} months at your current surplus` : ""}.` : " ✅ You already have the 3-month minimum."}`,
+    hi: `आपके लिए: औसत खर्च ${m(st.avgExpense)}/महीना है, तो लक्ष्य ${m(lo)}–${m(hi)} है। आपका बैलेंस ${m(st.balance)} लगभग ${Math.round(months * 10) / 10} महीने चला सकता है।${gap > 0 ? ` 3 महीने के न्यूनतम के लिए ${m(gap)} और चाहिए${st.avgIncome > st.avgExpense ? ` — मौजूदा बचत से लगभग ${Math.ceil(gap / (st.avgIncome - st.avgExpense))} महीने` : ""}।` : " ✅ 3 महीने का न्यूनतम फंड पहले से है।"}`,
+    gu: `તમારા માટે: સરેરાશ ખર્ચ ${m(st.avgExpense)}/મહિનો છે, એટલે લક્ષ્ય ${m(lo)}–${m(hi)} છે. તમારું બેલેન્સ ${m(st.balance)} આશરે ${Math.round(months * 10) / 10} મહિના ચલાવી શકે.${gap > 0 ? ` 3 મહિનાના લઘુત્તમ માટે ${m(gap)} વધુ જોઈએ${st.avgIncome > st.avgExpense ? ` — હાલની બચતથી આશરે ${Math.ceil(gap / (st.avgIncome - st.avgExpense))} મહિના` : ""}.` : " ✅ 3 મહિનાનું લઘુત્તમ ફંડ પહેલેથી છે."}`,
+    hn: `Aapke liye: average kharcha ${m(st.avgExpense)}/mahina hai, to target ${m(lo)}–${m(hi)} hai. Aapka balance ${m(st.balance)} lagbhag ${Math.round(months * 10) / 10} mahine chala sakta hai.${gap > 0 ? ` 3 mahine ke minimum ke liye ${m(gap)} aur chahiye${st.avgIncome > st.avgExpense ? ` — current bachat se lagbhag ${Math.ceil(gap / (st.avgIncome - st.avgExpense))} mahine` : ""}.` : " ✅ 3 mahine ka minimum fund pehle se hai."}`,
+  });
+  const action = gap > 0 && t.scope === "self" ? L(lang, { en: "Create an emergency fund goal", hi: "इमरजेंसी फंड गोल बनाओ", gu: "ઇમરજન્સી ફંડ ગોલ બનાવો", hn: "Emergency fund goal banao" }) : null;
+  return reply(lang, `${base}\n${mine}`, { speak: mine, suggestions: [...(action ? [`${action} ${Math.round(lo / 1000) * 1000}`] : []), ...sug(lang, "advice")].slice(0, 3) });
+}
+
+async function answerSubscriptions(lang: Lang, t: Target, cur: string): Promise<EngineReply> {
+  const rows = await T.recurringList(String(t.owner._id));
+  const m = (n: number) => money(n, cur);
+  if (!rows.length) return reply(lang, L(lang, { en: "I don't see any repeating payments yet. When you add rent, bills or subscriptions, choose “Monthly” (and tick Auto-repeat to have them added automatically).", hi: "अभी कोई बार-बार होने वाला भुगतान नहीं दिखा। किराया, बिल या सब्सक्रिप्शन जोड़ते समय “Monthly” चुनिए (और Auto-repeat चुनें ताकि अपने-आप जुड़ें)।", gu: "હજી કોઈ વારંવાર થતી ચુકવણી દેખાતી નથી. ભાડું, બિલ કે સબ્સ્ક્રિપ્શન ઉમેરતી વખતે “Monthly” પસંદ કરો (અને Auto-repeat પસંદ કરો જેથી આપમેળે ઉમેરાય).", hn: "Abhi koi baar-baar hone wala payment nahi dikha. Rent, bills ya subscriptions add karte waqt “Monthly” chuniye (aur Auto-repeat chuniye taaki apne-aap judein)." }));
+  const monthly = rows.reduce((s, r) => s + (r.recurring === "weekly" ? r.amount * 4.33 : r.recurring === "yearly" ? r.amount / 12 : r.amount), 0);
+  const text = L(lang, {
+    en: `${rows.length} repeating payments ≈ ${m(Math.round(monthly))}/month (${m(Math.round(monthly * 12))} a year). Anything you no longer use is an easy saving.`,
+    hi: `${rows.length} बार-बार होने वाले भुगतान ≈ ${m(Math.round(monthly))}/महीना (${m(Math.round(monthly * 12))} सालाना)। जो अब इस्तेमाल नहीं होता, उसे बंद करना आसान बचत है।`,
+    gu: `${rows.length} વારંવાર થતી ચુકવણી ≈ ${m(Math.round(monthly))}/મહિનો (${m(Math.round(monthly * 12))} વાર્ષિક). જે હવે વપરાતું નથી તે બંધ કરવું સરળ બચત છે.`,
+    hn: `${rows.length} baar-baar hone wale payments ≈ ${m(Math.round(monthly))}/mahina (${m(Math.round(monthly * 12))} saalana). Jo ab use nahi hota, use band karna aasaan bachat hai.`,
+  });
+  return reply(lang, text, { cards: [{ type: "list", items: rows.slice(0, 8).map((r) => ({ title: r.title, subtitle: `${catLabel(lang, r.category)} · ${r.recurring}${r.auto ? " · auto" : ""}`, value: m(r.amount), tone: "neg" as const })) }], suggestions: sug(lang, "money") });
+}
+
+/** General money knowledge + a personal touch where we have the numbers. */
+async function answerKb(lang: Lang, topic: string, t: Target, cur: string, today: string): Promise<EngineReply> {
+  const e = KB[topic];
+  if (!e) return reply(lang, L(lang, HELP));
+  const lines = [L(lang, e.answer)];
+  const id = String(t.owner._id);
+  const m = (n: number) => money(Math.round(n), cur);
+  try {
+    if (topic === "debt_strategy") {
+      const debts = (await T.debtsOf(id)).filter((d) => d.status === "active");
+      if (debts.length >= 2) {
+        const av = [...debts].sort((a, b) => b.interestRate - a.interestRate)[0];
+        const sb = [...debts].sort((a, b) => a.remaining - b.remaining)[0];
+        lines.push(L(lang, { en: `For your loans: avalanche → “${av.title}” first (${av.interestRate}%); snowball → “${sb.title}” first (${m(sb.remaining)} left).`, hi: `आपके लोन के लिए: avalanche → पहले “${av.title}” (${av.interestRate}%); snowball → पहले “${sb.title}” (${m(sb.remaining)} बाकी)।`, gu: `તમારી લોન માટે: avalanche → પહેલાં “${av.title}” (${av.interestRate}%); snowball → પહેલાં “${sb.title}” (${m(sb.remaining)} બાકી).`, hn: `Aapke loans ke liye: avalanche → pehle “${av.title}” (${av.interestRate}%); snowball → pehle “${sb.title}” (${m(sb.remaining)} baaki).` }));
+      }
+    } else if (topic === "sip" || topic === "fd_vs_sip" || topic === "retirement") {
+      const st = await T.advisorStats(id, today);
+      const surplus = st.avgIncome - st.avgExpense;
+      if (surplus > 0) lines.push(L(lang, { en: `Your average monthly surplus is about ${m(surplus)} — after your emergency fund is in place, part of that could go into long-term investing.`, hi: `आपकी औसत मासिक बचत लगभग ${m(surplus)} है — इमरजेंसी फंड बनने के बाद इसका कुछ हिस्सा लंबे निवेश में जा सकता है।`, gu: `તમારી સરેરાશ માસિક બચત આશરે ${m(surplus)} છે — ઇમરજન્સી ફંડ બન્યા પછી તેનો થોડો ભાગ લાંબા રોકાણમાં જઈ શકે.`, hn: `Aapki average monthly bachat lagbhag ${m(surplus)} hai — emergency fund banne ke baad iska kuch hissa long-term investment mein ja sakta hai.` }));
+    } else if (topic === "budgeting") {
+      const n = await Budget.countDocuments({ userId: t.owner._id });
+      if (n) lines.push(L(lang, { en: `You already have ${n} budget${n > 1 ? "s" : ""} — ask “budget status” anytime.`, hi: `आपके ${n} बजट पहले से हैं — कभी भी पूछिए “बजट स्टेटस”।`, gu: `તમારાં ${n} બજેટ પહેલેથી છે — ક્યારેય પણ પૂછો “બજેટ સ્ટેટસ”.`, hn: `Aapke ${n} budget pehle se hain — kabhi bhi poochiye “budget status”.` }));
+    }
+  } catch {
+    /* personal extras are best-effort */
+  }
+  return reply(lang, lines.join("\n"), { speak: lines[0].split(/(?<=[.।])\s/).slice(0, 2).join(" "), suggestions: e.next.map((x) => L(lang, x)).slice(0, 3) });
+}
+
+async function answerVisitors(lang: Lang, period: Period | null, today: string): Promise<EngineReply> {
+  const start = period?.start ?? parseYmd(today);
+  const v = await T.visitorsSummary(start);
+  const pl = period ? periodLabel(lang, period) : L(lang, { en: "today", hi: "आज", gu: "આજે", hn: "aaj" });
+  const places = v.places.map((p) => `${p.place} (${p.n})`).join(", ");
+  const text = L(lang, {
+    en: `${v.online} visitor${v.online === 1 ? "" : "s"} online right now. ${cap(pl)}: ${v.visitors} unique visitors, ${v.views} page views, ${v.signedIn} signed-in users.${places ? `\nTop places: ${places}.` : ""}\n(Locations are approximate, from the visitor's IP.)`,
+    hi: `अभी ${v.online} विज़िटर ऑनलाइन हैं। ${pl}: ${v.visitors} अलग विज़िटर, ${v.views} पेज व्यू, ${v.signedIn} लॉगिन यूज़र।${places ? `\nसबसे ज़्यादा: ${places}।` : ""}\n(लोकेशन लगभग है, IP से।)`,
+    gu: `હમણાં ${v.online} વિઝિટર ઓનલાઇન છે. ${pl}: ${v.visitors} અલગ વિઝિટર, ${v.views} પેજ વ્યૂ, ${v.signedIn} લૉગિન યુઝર.${places ? `\nસૌથી વધુ: ${places}.` : ""}\n(લોકેશન આશરે છે, IP પરથી.)`,
+    hn: `Abhi ${v.online} visitors online hain. ${cap(pl)}: ${v.visitors} unique visitors, ${v.views} page views, ${v.signedIn} logged-in users.${places ? `\nTop places: ${places}.` : ""}\n(Location approximate hai, IP se.)`,
+  });
+  const card: Card = { type: "list", title: L(lang, { en: "Latest visits", hi: "हाल के विज़िट", gu: "તાજેતરની મુલાકાતો", hn: "Latest visits" }), items: v.recent.map((r) => ({ title: r.place, subtitle: `${r.path} · ${r.device}`, value: dateLabel(lang, new Date(r.at).toISOString().slice(0, 10)) })) };
+  return reply(lang, text, { speak: text.split("\n")[0], cards: v.recent.length ? [card] : [], suggestions: sug(lang, "admin") });
+}
+
+/** A short "thinking" line added after plain number answers: compares with the usual and with budgets. */
+async function thinkAbout(lang: Lang, intent: Intent, t: Target, cur: string, period: Period, category: string | null, today: string): Promise<string | null> {
+  if (t.scope === "platform") return null;
+  const id = String(t.owner._id);
+  const m = (n: number) => money(Math.round(n), cur);
+  try {
+    if (intent === "expense" && (period.kind === "month" || period.kind === "namedMonth")) {
+      const isCurrent = period.kind === "month";
+      const st = await T.advisorStats(id, today);
+      const avg = category ? st.categoryAvg.find((c) => c.category === category)?.avg ?? 0 : st.avgExpense;
+      if (!avg || st.months < 2) return null;
+      const s = await T.periodSums(id, period.start, period.end, category);
+      const day = parseYmd(today).getUTCDate();
+      const dim = new Date(period.end.getTime() - 86400000).getUTCDate();
+      const proj = isCurrent && day < dim ? (s.expense / Math.max(1, day)) * dim : s.expense;
+      const ch = Math.round(((proj - avg) / avg) * 100);
+      if (Math.abs(ch) < 10) return L(lang, { en: `💡 That's in line with your usual ${m(avg)}${M3(lang)}.`, hi: `💡 ये आपके सामान्य ${m(avg)}${M3(lang)} के बराबर है।`, gu: `💡 આ તમારા સામાન્ય ${m(avg)}${M3(lang)} જેટલું જ છે.`, hn: `💡 Ye aapke normal ${m(avg)}${M3(lang)} ke barabar hai.` });
+      return ch > 0
+        ? L(lang, { en: `💡 ${isCurrent ? `At this pace the month ends near ${m(proj)} — ` : ""}${ch}% above your usual ${m(avg)}${M3(lang)}. Ask “why did my spending go up?” to see what changed.`, hi: `💡 ${isCurrent ? `इसी रफ़्तार से महीना लगभग ${m(proj)} पर खत्म होगा — ` : ""}आपके सामान्य ${m(avg)}${M3(lang)} से ${ch}% ज़्यादा। “खर्च क्यों बढ़ा?” पूछिए, मैं वजह बताऊंगी।`, gu: `💡 ${isCurrent ? `આ ઝડપે મહિનો આશરે ${m(proj)} પર પૂરો થશે — ` : ""}તમારા સામાન્ય ${m(avg)}${M3(lang)} કરતાં ${ch}% વધુ. “ખર્ચ કેમ વધ્યો?” પૂછો, હું કારણ બતાવીશ.`, hn: `💡 ${isCurrent ? `Isi raftaar se mahina lagbhag ${m(proj)} pe khatam hoga — ` : ""}aapke normal ${m(avg)}${M3(lang)} se ${ch}% zyada. “Kharcha kyu badha?” poochiye, main wajah bataungi.` })
+        : L(lang, { en: `💡 ${Math.abs(ch)}% below your usual ${m(avg)}${M3(lang)} — well done.`, hi: `💡 आपके सामान्य ${m(avg)}${M3(lang)} से ${Math.abs(ch)}% कम — बढ़िया।`, gu: `💡 તમારા સામાન્ય ${m(avg)}${M3(lang)} કરતાં ${Math.abs(ch)}% ઓછું — સરસ.`, hn: `💡 Aapke normal ${m(avg)}${M3(lang)} se ${Math.abs(ch)}% kam — badhiya.` });
+    }
+    if (intent === "balance") {
+      const goals = await T.goalsOf(id, false);
+      const set = goals.filter((g) => g.status !== "cancelled").reduce((x, g) => x + g.current, 0);
+      if (set > 0) {
+        const life = await T.lifetime(id);
+        return L(lang, { en: `💡 ${m(set)} of this is set aside in goals, so ${signedMoney(life.balance - set, cur)} is free to spend.`, hi: `💡 इसमें से ${m(set)} गोल में अलग रखे हैं, यानी खर्च के लिए ${signedMoney(life.balance - set, cur)} खाली हैं।`, gu: `💡 આમાંથી ${m(set)} ગોલમાં અલગ રાખ્યા છે, એટલે ખર્ચ માટે ${signedMoney(life.balance - set, cur)} ખાલી છે.`, hn: `💡 Isme se ${m(set)} goals mein alag rakhe hain, yaani kharch ke liye ${signedMoney(life.balance - set, cur)} free hain.` });
+      }
+    }
+    if (intent === "income" && (period.kind === "month" || period.kind === "lastMonth" || period.kind === "namedMonth")) {
+      const prevStart = new Date(Date.UTC(period.start.getUTCFullYear(), period.start.getUTCMonth() - 1, 1));
+      const [a, b] = await Promise.all([T.periodSums(id, period.start, period.end), T.periodSums(id, prevStart, period.start)]);
+      if (a.income && b.income) {
+        const ch = Math.round(((a.income - b.income) / b.income) * 100);
+        if (Math.abs(ch) >= 5) return L(lang, { en: `💡 ${ch > 0 ? "Up" : "Down"} ${Math.abs(ch)}% from the month before (${m(b.income)}).`, hi: `💡 पिछले महीने (${m(b.income)}) से ${Math.abs(ch)}% ${ch > 0 ? "ज़्यादा" : "कम"}।`, gu: `💡 ગયા મહિના (${m(b.income)}) કરતાં ${Math.abs(ch)}% ${ch > 0 ? "વધુ" : "ઓછી"}.`, hn: `💡 Pichle mahine (${m(b.income)}) se ${Math.abs(ch)}% ${ch > 0 ? "zyada" : "kam"}.` });
+      }
+    }
+    if (intent === "savings") {
+      const st = await T.advisorStats(id, today);
+      if (st.avgIncome > 0) {
+        const rate = Math.round(((st.avgIncome - st.avgExpense) / st.avgIncome) * 100);
+        return L(lang, { en: `💡 Your 3-month average savings rate is ${rate}%${rate < 20 ? " — 20% is a healthy target." : " — above the 20% benchmark 👏"}`, hi: `💡 पिछले 3 महीनों की औसत बचत दर ${rate}% है${rate < 20 ? " — 20% अच्छा लक्ष्य है।" : " — 20% से ऊपर 👏"}`, gu: `💡 છેલ્લા 3 મહિનાનો સરેરાશ બચત દર ${rate}% છે${rate < 20 ? " — 20% સારું લક્ષ્ય છે." : " — 20% થી ઉપર 👏"}`, hn: `💡 Pichle 3 mahine ka average savings rate ${rate}% hai${rate < 20 ? " — 20% achha target hai." : " — 20% se upar 👏"}` });
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 // ======================= actions =======================
 type Actor = { user: UserDoc; ip: string };
 
@@ -928,8 +1230,86 @@ async function execute(kind: ActionKind, payload: Record<string, unknown>, owner
       const before: any = await Goal.findOne({ _id: oid(String(payload.goalId)), userId: owner._id }).lean();
       const minor = toMinor(payload.amount);
       if (!before || minor === null) throw new ApiError(404, "Goal not found.");
-      await contributeGoal(actor, owner, String(payload.goalId), minor);
-      return { summary: String(payload.goalName), undo: { goalId: String(payload.goalId), minor, prevStatus: before.status }, canUndo: true };
+      await contributeGoal(actor, owner, String(payload.goalId), minor, { source: "angel", note: "Added by Angel AI" });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const led: any = await GoalContribution.findOne({ goalId: before._id, source: "angel" }).sort({ createdAt: -1 }).select("_id").lean();
+      return { summary: String(payload.goalName), undo: { goalId: String(payload.goalId), minor, prevStatus: before.status, ledgerId: led ? String(led._id) : null }, canUndo: true };
+    }
+    case "goal_withdraw": {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const before: any = await Goal.findOne({ _id: oid(String(payload.goalId)), userId: owner._id }).lean();
+      const minor = toMinor(payload.amount);
+      if (!before || minor === null) throw new ApiError(404, "Goal not found.");
+      await contributeGoal(actor, owner, String(payload.goalId), minor, { withdraw: true, source: "angel", note: "Withdrawn via Angel AI" });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const led: any = await GoalContribution.findOne({ goalId: before._id, source: "angel" }).sort({ createdAt: -1 }).select("_id").lean();
+      return { summary: String(payload.goalName), undo: { goalId: String(payload.goalId), minor, prevStatus: before.status, ledgerId: led ? String(led._id) : null }, canUndo: true };
+    }
+    case "set_budget": {
+      const category = String(payload.category);
+      const minor = toMinor(payload.amount);
+      if (minor === null || minor <= 0) throw new ApiError(400, "Enter a valid monthly limit.");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const prev: any = await Budget.findOne({ userId: owner._id, category }).lean();
+      if (!prev && (await Budget.countDocuments({ userId: owner._id })) >= 40) throw new ApiError(400, "You can have up to 40 budgets.");
+      await Budget.updateOne({ userId: owner._id, category }, { $set: { amount: minor, alertPct: prev?.alertPct ?? 80 }, $unset: { lastAlert: 1 } }, { upsert: true });
+      await audit({ actor: actor.user, action: String(actor.user._id) === String(owner._id) ? "finance.budget.set" : "admin.finance.budget.set", resource: "budget", targetUserId: String(owner._id), metadata: { category, amount: fromMinor(minor), via: "angel" }, ip: actor.ip });
+      await publish([userChannel(String(owner._id))], "finance:changed", { resource: "budget", action: "update" });
+      await checkBudgetAlerts(owner, category === TOTAL ? null : category);
+      return { summary: `${category === TOTAL ? "Monthly" : category} budget`, undo: { category, prev: prev ? { amount: prev.amount, alertPct: prev.alertPct ?? 80 } : null }, canUndo: true };
+    }
+    case "edit_record": {
+      const resource = payload.resource as "income" | "expense";
+      await updateRecord(actor, owner, resource, String(payload.id), { amount: payload.amount });
+      return { summary: String(payload.title), undo: { resource, id: String(payload.id), amount: payload.prevAmount }, canUndo: true };
+    }
+    case "delete_user": {
+      if (actor.user.role !== "admin" || !perms.includes("users.delete")) throw new ApiError(403, "You do not have permission to perform this action.");
+      const target = await User.findById(String(payload.userId)).lean<UserDoc>();
+      if (!target) throw new ApiError(404, "User not found.");
+      if (String(target._id) === String(actor.user._id)) throw new ApiError(400, "You can't delete your own account from Angel. Use Settings → Delete account (needs your password).");
+      assertCanManage(target, perms);
+      if (target.role === "admin") {
+        if (!perms.includes("users.update")) throw new ApiError(403, "You do not have permission to remove an administrator.");
+        await assertNotLastAdmin(target, "delete");
+      }
+      await deleteUserCompletely(target._id);
+      await audit({ actor: actor.user, action: "admin.user.delete", resource: "user", resourceId: String(target._id), metadata: { email: target.email, via: "angel" }, ip: actor.ip });
+      await publish(["admin"], "admin:activity", { action: "admin.user.delete" });
+      return { summary: `${target.name} <${target.email}>`, canUndo: false };
+    }
+    case "set_user_status": {
+      if (actor.user.role !== "admin" || !perms.includes("users.update")) throw new ApiError(403, "You do not have permission to perform this action.");
+      const target = await User.findById(String(payload.userId)).lean<UserDoc>();
+      if (!target) throw new ApiError(404, "User not found.");
+      if (String(target._id) === String(actor.user._id)) throw new ApiError(400, "You can't change your own account status.");
+      assertCanManage(target, perms);
+      const status = payload.status === "disabled" ? "disabled" : "active";
+      if (status === "disabled") await assertNotLastAdmin(target, "disable");
+      await User.updateOne({ _id: target._id }, { $set: { status } });
+      if (status === "disabled") {
+        await Session.deleteMany({ userId: target._id });
+        await publish([userChannel(String(target._id))], "session:revoked", {});
+      } else {
+        await notifyUser(String(target._id), { type: "admin", title: "Account re-enabled", message: "An administrator re-enabled your account. Welcome back!", link: "/dashboard" });
+      }
+      await audit({ actor: actor.user, action: "admin.user.status", resource: "user", resourceId: String(target._id), targetUserId: String(target._id), metadata: { status: { from: target.status, to: status }, via: "angel" }, ip: actor.ip });
+      await publish(["admin"], "admin:activity", { action: "admin.user.status" });
+      return { summary: `${target.name} → ${status}`, undo: { userId: String(target._id), status: target.status }, canUndo: false };
+    }
+    case "reset_password": {
+      if (actor.user.role !== "admin" || !perms.includes("users.update")) throw new ApiError(403, "You do not have permission to perform this action.");
+      const target = await User.findById(String(payload.userId)).lean<UserDoc>();
+      if (!target) throw new ApiError(404, "User not found.");
+      if (String(target._id) === String(actor.user._id)) throw new ApiError(400, "Change your own password in Settings → Change password.");
+      if (target.role === "admin") throw new ApiError(400, "Administrators reset their own password (Settings or “Forgot password”).");
+      const temp = makeTempPassword();
+      await User.updateOne({ _id: target._id }, { $set: { passwordHash: await hashPassword(temp) } });
+      await Session.deleteMany({ userId: target._id });
+      await publish([userChannel(String(target._id))], "session:revoked", {});
+      await audit({ actor: actor.user, action: "admin.user.password_reset", resource: "user", resourceId: String(target._id), targetUserId: String(target._id), metadata: { via: "angel" }, ip: actor.ip });
+      await notifyUser(String(target._id), { type: "admin", title: "Password reset by admin", message: "An administrator reset your password. Sign in with the temporary password they share with you, then change it in Settings.", link: "/settings" });
+      return { summary: `${target.name}`, canUndo: false, ephemeral: [{ type: "secret", title: "Temporary password", value: temp, note: "Shown only once and never saved in the chat. Share it privately; the user should change it in Settings." }] };
     }
     case "pay_emi": {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1054,6 +1434,49 @@ async function doneText(lang: Lang, kind: ActionKind, payload: Record<string, un
       });
     case "delete_record":
       return L(lang, { en: `✓ Deleted “${payload.title}”.`, hi: `✓ “${payload.title}” हटा दिया।`, gu: `✓ “${payload.title}” કાઢી નાખ્યું.`, hn: `✓ “${payload.title}” delete kar diya.` });
+    case "goal_withdraw":
+      return L(lang, {
+        en: `✓ Took ${m(amount)} out of “${payload.goalName}”${forWhom}. Its progress is updated.`,
+        hi: `✓ “${payload.goalName}” से ${m(amount)} निकाल लिए${forWhom}। प्रगति अपडेट हो गई।`,
+        gu: `✓ “${payload.goalName}” માંથી ${m(amount)} કાઢી લીધા${forWhom}. પ્રગતિ અપડેટ થઈ ગઈ.`,
+        hn: `✓ “${payload.goalName}” se ${m(amount)} nikal liye${forWhom}. Progress update ho gayi.`,
+      });
+    case "set_budget": {
+      const c = String(payload.category);
+      const name = c === TOTAL ? L(lang, { en: "monthly", hi: "महीने का", gu: "મહિનાનું", hn: "monthly" }) : catLabel(lang, c);
+      const spent = c === TOTAL ? (await T.periodSums(String(owner._id), thisMonth(today).start, thisMonth(today).end)).expense : await categoryMonthTotal(String(owner._id), c, today);
+      return L(lang, {
+        en: `✓ ${cap(name)} budget set to ${m(amount)}/month${forWhom}. Spent so far this month: ${m(spent)} (${Math.round((spent / amount) * 100)}%). I'll warn at 80% and 100%.`,
+        hi: `✓ ${name} बजट ${m(amount)}/महीना कर दिया${forWhom}। इस महीने अब तक: ${m(spent)} (${Math.round((spent / amount) * 100)}%)। 80% और 100% पर बताऊंगी।`,
+        gu: `✓ ${name} બજેટ ${m(amount)}/મહિનો કરી દીધું${forWhom}. આ મહિને અત્યાર સુધી: ${m(spent)} (${Math.round((spent / amount) * 100)}%). 80% અને 100% પર જણાવીશ.`,
+        hn: `✓ ${cap(name)} budget ${m(amount)}/mahina kar diya${forWhom}. Is mahine ab tak: ${m(spent)} (${Math.round((spent / amount) * 100)}%). 80% aur 100% pe bataungi.`,
+      });
+    }
+    case "edit_record":
+      return L(lang, {
+        en: `✓ Changed “${payload.title}” from ${m(Number(payload.prevAmount))} to ${m(amount)}.`,
+        hi: `✓ “${payload.title}” को ${m(Number(payload.prevAmount))} से ${m(amount)} कर दिया।`,
+        gu: `✓ “${payload.title}” ને ${m(Number(payload.prevAmount))} થી ${m(amount)} કરી દીધું.`,
+        hn: `✓ “${payload.title}” ko ${m(Number(payload.prevAmount))} se ${m(amount)} kar diya.`,
+      });
+    case "delete_user":
+      return L(lang, {
+        en: `✓ Deleted ${payload.userName}'s account and all their data.`,
+        hi: `✓ ${payload.userName} का अकाउंट और उनका सारा डेटा हटा दिया।`,
+        gu: `✓ ${payload.userName} નું એકાઉન્ટ અને તેમનો બધો ડેટા કાઢી નાખ્યો.`,
+        hn: `✓ ${payload.userName} ka account aur unka saara data delete kar diya.`,
+      });
+    case "set_user_status":
+      return payload.status === "disabled"
+        ? L(lang, { en: `✓ ${payload.userName} is blocked and signed out of every device.`, hi: `✓ ${payload.userName} को ब्लॉक कर दिया और हर डिवाइस से लॉगआउट कर दिया।`, gu: `✓ ${payload.userName} ને બ્લોક કરી દીધા અને દરેક ડિવાઇસમાંથી લૉગઆઉટ કર્યા.`, hn: `✓ ${payload.userName} ko block kar diya aur har device se logout kar diya.` })
+        : L(lang, { en: `✓ ${payload.userName} can sign in again.`, hi: `✓ ${payload.userName} अब फिर से लॉगिन कर सकते हैं।`, gu: `✓ ${payload.userName} હવે ફરી લૉગિન કરી શકે છે.`, hn: `✓ ${payload.userName} ab phir se login kar sakte hain.` });
+    case "reset_password":
+      return L(lang, {
+        en: `✓ ${payload.userName}'s password was reset and they were signed out everywhere. The temporary password is below — only this once.`,
+        hi: `✓ ${payload.userName} का पासवर्ड रीसेट कर दिया और हर जगह से लॉगआउट कर दिया। अस्थायी पासवर्ड नीचे है — सिर्फ़ एक बार दिखेगा।`,
+        gu: `✓ ${payload.userName} નો પાસવર્ડ રીસેટ કર્યો અને દરેક જગ્યાએથી લૉગઆઉટ કર્યા. કામચલાઉ પાસવર્ડ નીચે છે — ફક્ત એક જ વાર.`,
+        hn: `✓ ${payload.userName} ka password reset kar diya aur har jagah se logout kar diya. Temporary password neeche hai — sirf ek baar.`,
+      });
     case "create_user":
       return L(lang, {
         en: `✓ Created user ${payload.name} (${payload.email}) on the ${getPlan(String(payload.plan)).name} plan. The temporary password is shown below — only this once.`,
@@ -1193,6 +1616,69 @@ async function planAction(intent: Intent, p: Parsed, inp: EngineInput, lang: Lan
         hn: `Ye ${last.resource} delete kar dun? ${desc}`,
       });
     }
+    case "goal_withdraw": {
+      if (!canWrite(perms, t, "goal", "update")) return { reply: deny(lang, "perm") };
+      const goals = (await T.goalsOf(ownerId, false)).filter((g) => g.status !== "cancelled" && g.current > 0);
+      if (!goals.length) return { reply: reply(lang, L(lang, { en: "None of your goals has money in it yet.", hi: "अभी किसी गोल में पैसे नहीं हैं।", gu: "હજી કોઈ ગોલમાં પૈસા નથી.", hn: "Abhi kisi goal mein paise nahi hain." })) };
+      let goal = pre?.goalId ? goals.find((g) => g.id === pre.goalId) : undefined;
+      if (!goal) {
+        const matched = matchByName(goals, (g) => g.name, p.contentWords);
+        goal = matched.length === 1 ? matched[0] : goals.length === 1 ? goals[0] : undefined;
+      }
+      if (!goal) return ask("goal", "goal_withdraw", { amount }, { en: "From which goal?", hi: "किस गोल से?", gu: "કયા ગોલમાંથી?", hn: "Kaun se goal se?" }, goals.map((g) => ({ id: g.id, label: `${g.name} (${money(g.current, cur)})` })));
+      const payload = { goalId: goal.id, goalName: goal.name, amount };
+      if (!amount) return ask("amount", "goal_withdraw", payload, { en: `How much should I take out of “${goal.name}”?`, hi: `“${goal.name}” से कितने निकालूं?`, gu: `“${goal.name}” માંથી કેટલા કાઢું?`, hn: `“${goal.name}” se kitne nikalun?` });
+      if (amount > goal.current) return { reply: reply(lang, L(lang, { en: `“${goal.name}” only holds ${money(goal.current, cur)}.`, hi: `“${goal.name}” में सिर्फ़ ${money(goal.current, cur)} हैं।`, gu: `“${goal.name}” માં માત્ર ${money(goal.current, cur)} છે.`, hn: `“${goal.name}” mein sirf ${money(goal.current, cur)} hain.` })) };
+      return run("goal_withdraw", payload);
+    }
+    case "set_budget": {
+      if (!canWrite(perms, t, "expense", "create")) return { reply: deny(lang, "perm") };
+      const totalWord = /(^| )(total|overall|monthly|month|mahine|mahina|महीने|महीना|કુલ|મહિનાનું|mahinanu|poora|pura)( |$)/.test(` ${p.tokens.join(" ")} `);
+      const category = (pre?.category as string | undefined) ?? p.expenseCategory ?? (totalWord ? TOTAL : null);
+      const payload = { category, amount, title: category ?? "" };
+      if (!category)
+        return ask("category", "set_budget", payload, { en: `For which category is the ${amount ? money(amount, cur) + " " : ""}budget? (e.g. food, petrol, shopping — or “total”)`, hi: `${amount ? money(amount, cur) + " का " : ""}बजट किस कैटेगरी के लिए? (जैसे खाना, पेट्रोल, शॉपिंग — या “total”)`, gu: `${amount ? money(amount, cur) + " નું " : ""}બજેટ કઈ કેટેગરી માટે? (જેમ કે ખાવાનું, પેટ્રોલ, શોપિંગ — અથવા “total”)`, hn: `${amount ? money(amount, cur) + " ka " : ""}budget kis category ke liye? (jaise food, petrol, shopping — ya “total”)` });
+      if (!amount) return ask("amount", "set_budget", payload, { en: `What monthly limit for ${category === TOTAL ? "the whole month" : catLabel(lang, category)}?`, hi: `${category === TOTAL ? "पूरे महीने" : catLabel(lang, category)} की महीने की लिमिट कितनी रखूं?`, gu: `${category === TOTAL ? "આખા મહિના" : catLabel(lang, category)} ની મહિનાની લિમિટ કેટલી રાખું?`, hn: `${category === TOTAL ? "Poore mahine" : catLabel(lang, category)} ki monthly limit kitni rakhun?` });
+      return run("set_budget", { category, amount, title: `${category === TOTAL ? "Monthly" : category} budget` });
+    }
+    case "delete_entry": {
+      const resource = p.hits.income || p.incomeCategory ? "income" : p.hits.expense || p.expenseCategory ? "expense" : null;
+      if (!canWrite(perms, t, resource ?? "expense", "delete")) return { reply: deny(lang, "perm") };
+      let found: { id: string; resource: "income" | "expense"; title: string; category: string; amount: number; date: string } | null = null;
+      if (pre?.entryId) {
+        const [res, rid] = String(pre.entryId).split(":");
+        if (isObjectId(rid)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const d: any = await (res === "income" ? Income : Expense).findOne({ _id: oid(rid), userId: t.owner._id }).lean();
+          if (d) found = { id: rid, resource: res === "income" ? "income" : "expense", title: d.title, category: d.category, amount: fromMinor(d.amount), date: new Date(d.date).toISOString().slice(0, 10) };
+        }
+      }
+      if (!found) {
+        const list = await T.findEntries(ownerId, { words: p.contentWords, category: p.expenseCategory ?? p.incomeCategory, amount: p.amount, resource });
+        if (!list.length) return { reply: reply(lang, L(lang, { en: "I couldn't find a matching entry in the last 4 months. Try the title, e.g. “delete the swiggy expense”.", hi: "पिछले 4 महीनों में ऐसी कोई एंट्री नहीं मिली। नाम से बोलिए, जैसे “swiggy वाला खर्च हटाओ”।", gu: "છેલ્લા 4 મહિનામાં આવી કોઈ એન્ટ્રી મળી નહીં. નામથી કહો, જેમ કે “swiggy વાળો ખર્ચ કાઢો”.", hn: "Pichle 4 mahine mein aisi koi entry nahi mili. Naam se boliye, jaise “swiggy wala kharcha hatao”." })) };
+        if (list.length > 1)
+          return ask("entry", "delete_record", {}, { en: "Which one should I delete?", hi: "कौन सी हटाऊं?", gu: "કઈ કાઢું?", hn: "Kaunsi delete karun?" }, list.map((e) => ({ id: `${e.resource}:${e.id}`, label: `${e.title} — ${money(e.amount, cur)} · ${dateLabel(lang, e.date)}` })));
+        found = list[0];
+      }
+      if (!found) return { reply: reply(lang, cancelText(lang)) };
+      const desc = `${found.title} — ${money(found.amount, cur)} (${catLabel(lang, found.category)}, ${dateLabel(lang, found.date)})`;
+      return confirm("delete_record", { resource: found.resource, id: found.id, title: found.title }, desc, {
+        en: `Delete this ${found.resource}? ${desc}`,
+        hi: `ये ${found.resource === "income" ? "आमदनी" : "खर्च"} हटा दूं? ${desc}`,
+        gu: `આ ${found.resource === "income" ? "આવક" : "ખર્ચ"} કાઢી નાખું? ${desc}`,
+        hn: `Ye ${found.resource} delete kar dun? ${desc}`,
+      });
+    }
+    case "edit_last": {
+      const resource = p.hits.income || p.incomeCategory ? "income" : p.hits.expense || p.expenseCategory ? "expense" : null;
+      if (!canWrite(perms, t, resource ?? "expense", "update")) return { reply: deny(lang, "perm") };
+      const last = await T.lastCreated(ownerId, resource);
+      if (!last) return { reply: reply(lang, L(lang, { en: "There's no entry to change yet.", hi: "बदलने के लिए अभी कोई एंट्री नहीं है।", gu: "બદલવા માટે હજી કોઈ એન્ટ્રી નથી.", hn: "Badalne ke liye abhi koi entry nahi hai." })) };
+      // when two numbers are said ("250 ka tha 520 nahi, 250 kar do") the new amount is the one next to "kar do / to"
+      const amt = p.amounts.length > 1 ? p.amounts[p.amounts.length - 1].value : amount;
+      if (!amt) return ask("amount", "edit_record", { resource: last.resource, id: last.id, title: last.title, prevAmount: last.amount }, { en: `What should “${last.title}” (${money(last.amount, cur)}) be changed to?`, hi: `“${last.title}” (${money(last.amount, cur)}) को कितना करूं?`, gu: `“${last.title}” (${money(last.amount, cur)}) ને કેટલું કરું?`, hn: `“${last.title}” (${money(last.amount, cur)}) ko kitna karun?` });
+      return run("edit_record", { resource: last.resource, id: last.id, title: last.title, amount: amt, prevAmount: last.amount });
+    }
     case "create_user": {
       if (inp.actor.role !== "admin" || !perms.includes("users.create")) return { reply: deny(lang, "admin") };
       const email = (pre?.email as string | undefined) ?? p.email;
@@ -1238,7 +1724,10 @@ export async function undoAction(a: StoredAction, actorUser: UserDoc, ip: string
       create_goal: requiredPerms("goal", "delete"),
       create_debt: requiredPerms("debt", "delete"),
       goal_contribute: requiredPerms("goal", "update"),
+      goal_withdraw: requiredPerms("goal", "update"),
       pay_emi: [...requiredPerms("debt", "update"), "expense.delete"],
+      set_budget: ["finance.write"],
+      edit_record: requiredPerms((a.payload.resource as "income" | "expense") ?? "expense", "update"),
     };
     if ((NEED[a.kind] ?? []).some((x) => !perms.includes(x))) throw new ApiError(403, "You do not have permission to perform this action.");
   }
@@ -1251,13 +1740,15 @@ export async function undoAction(a: StoredAction, actorUser: UserDoc, ip: string
     case "create_debt":
       await deleteRecord(actor, owner, u.resource as "income" | "expense" | "goal" | "debt", String(u.id));
       return;
-    case "goal_contribute": {
+    case "goal_contribute":
+    case "goal_withdraw": {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const g: any = await Goal.findOne({ _id: oid(String(u.goalId)), userId: owner._id });
       if (!g) throw new ApiError(404, "Goal not found.");
-      g.currentAmount = Math.max(0, g.currentAmount - Number(u.minor));
+      g.currentAmount = Math.max(0, g.currentAmount + (a.kind === "goal_withdraw" ? Number(u.minor) : -Number(u.minor)));
       g.status = u.prevStatus ?? g.status;
       await g.save();
+      if (u.ledgerId && isObjectId(String(u.ledgerId))) await GoalContribution.deleteOne({ _id: oid(String(u.ledgerId)), userId: owner._id });
       await audit({ actor: actorUser, action: "finance.goal.contribution_undo", resource: "goal", resourceId: String(g._id), targetUserId: String(owner._id), metadata: { label: g.name, amount: fromMinor(Number(u.minor)), via: "angel" }, ip });
       await publish([userChannel(String(owner._id))], "finance:changed", { resource: "goal", action: "update", id: String(g._id) });
       return;
@@ -1280,6 +1771,16 @@ export async function undoAction(a: StoredAction, actorUser: UserDoc, ip: string
       await publish([userChannel(String(owner._id))], "finance:changed", { resource: "debt", action: "update", id: String(u.debtId) });
       return;
     }
+    case "set_budget": {
+      const prev = u.prev as { amount: number; alertPct: number } | null;
+      if (prev) await Budget.updateOne({ userId: owner._id, category: String(u.category) }, { $set: { amount: prev.amount, alertPct: prev.alertPct } });
+      else await Budget.deleteOne({ userId: owner._id, category: String(u.category) });
+      await publish([userChannel(String(owner._id))], "finance:changed", { resource: "budget", action: "update" });
+      return;
+    }
+    case "edit_record":
+      await updateRecord(actor, owner, u.resource as "income" | "expense", String(u.id), { amount: u.amount });
+      return;
     default:
       throw new ApiError(400, "This action cannot be undone.");
   }
@@ -1287,9 +1788,11 @@ export async function undoAction(a: StoredAction, actorUser: UserDoc, ip: string
 
 /** Runs a confirmed (pending) action — used by the Yes button and by saying "haan". */
 export async function runConfirmed(a: StoredAction, actorUser: UserDoc, ip: string, perms: Permission[], lang: Lang, cur: string): Promise<{ action: StoredAction; reply: EngineReply }> {
-  const owner = a.kind === "create_user" || a.kind === "change_plan" ? actorUser : await User.findById(a.ownerId).lean<UserDoc>();
+  const ADMIN_KINDS: ActionKind[] = ["create_user", "change_plan", "delete_user", "set_user_status", "reset_password"];
+  const adminKind = ADMIN_KINDS.includes(a.kind);
+  const owner = adminKind ? actorUser : await User.findById(a.ownerId).lean<UserDoc>();
   if (!owner) return { action: { ...a, status: "failed" }, reply: reply(lang, errorText(lang, new ApiError(404, "User not found."))) };
-  if (String(owner._id) !== String(actorUser._id) && !(actorUser.role === "admin" && perms.includes("users.finance.manage")) && a.kind !== "create_user" && a.kind !== "change_plan") {
+  if (String(owner._id) !== String(actorUser._id) && !(actorUser.role === "admin" && perms.includes("users.finance.manage")) && !adminKind) {
     return { action: { ...a, status: "failed" }, reply: deny(lang, "perm") };
   }
   const today = ymd(todayUTC());
@@ -1302,6 +1805,9 @@ export async function runConfirmed(a: StoredAction, actorUser: UserDoc, ip: stri
     goal_contribute: ["goal", "update"],
     pay_emi: ["debt", "update"],
     delete_record: [a.payload.resource === "income" ? "income" : "expense", "delete"],
+    goal_withdraw: ["goal", "update"],
+    edit_record: [a.payload.resource === "income" ? "income" : "expense", "update"],
+    set_budget: ["expense", "create"],
   };
   const need = RES[a.kind];
   if (need && self && !requiredPerms(need[0], need[1]).every((x) => perms.includes(x))) return { action: { ...a, status: "failed", needsConfirm: false }, reply: deny(lang, "perm") };
@@ -1309,10 +1815,94 @@ export async function runConfirmed(a: StoredAction, actorUser: UserDoc, ip: stri
     const r = await execute(a.kind, a.payload, owner, { user: actorUser, ip }, perms);
     const text = await doneText(lang, a.kind, a.payload, owner, { self, name: owner.name }, cur, today);
     const action: StoredAction = { ...a, status: "done", needsConfirm: false, canUndo: r.canUndo, undo: r.undo };
-    return { action, reply: reply(lang, text, { action: null, ephemeral: r.ephemeral, suggestions: sug(lang, a.kind === "create_user" || a.kind === "change_plan" ? "admin" : "action") }) };
+    return { action, reply: reply(lang, text, { action: null, ephemeral: r.ephemeral, suggestions: sug(lang, adminKind ? "admin" : "action") }) };
   } catch (err) {
     return { action: { ...a, status: "failed", needsConfirm: false }, reply: reply(lang, errorText(lang, err)) };
   }
+}
+
+// ======================= "did you mean" chips (from the learned model's guesses) =======================
+const ADMIN_ONLY = new Set(["platform_summary", "visitors", "delete_user", "disable_user", "enable_user", "reset_password", "create_user", "top_users", "users_query", "list_users"]);
+const DID_YOU_MEAN: Record<string, T4> = {
+  balance: { en: "What's my balance?", hi: "मेरा बैलेंस कितना है?", gu: "મારું બેલેન્સ કેટલું છે?", hn: "Mera balance kitna hai?" },
+  expense: { en: "How much did I spend this month?", hi: "इस महीने कितना खर्च हुआ?", gu: "આ મહિને કેટલો ખર્ચ થયો?", hn: "Is mahine kitna kharcha hua?" },
+  income: { en: "How much did I earn this month?", hi: "इस महीने कितनी आमदनी हुई?", gu: "આ મહિને કેટલી આવક થઈ?", hn: "Is mahine kitni income hui?" },
+  savings: { en: "How much did I save this month?", hi: "इस महीने कितनी बचत हुई?", gu: "આ મહિને કેટલી બચત થઈ?", hn: "Is mahine kitni bachat hui?" },
+  top_categories: { en: "Where did most of my money go?", hi: "सबसे ज़्यादा खर्च कहां हुआ?", gu: "સૌથી વધુ ખર્ચ ક્યાં થયો?", hn: "Sabse zyada kharcha kahan hua?" },
+  explain_change: { en: "Why did my spending go up?", hi: "खर्च क्यों बढ़ा?", gu: "ખર્ચ કેમ વધ્યો?", hn: "Kharcha kyu badha?" },
+  compare: { en: "Compare with last month", hi: "पिछले महीने से तुलना करो", gu: "ગયા મહિના સાથે સરખામણી કરો", hn: "Pichle mahine se compare karo" },
+  budget_status: { en: "Am I over budget?", hi: "क्या बजट पार हुआ?", gu: "બજેટ પાર થયું?", hn: "Budget cross hua kya?" },
+  goals: { en: "Are my goals on track?", hi: "मेरे गोल सही चल रहे हैं?", gu: "મારા ગોલ બરાબર ચાલે છે?", hn: "Mere goals on track hain?" },
+  debts: { en: "When is my next EMI?", hi: "अगली EMI कब है?", gu: "આગલી EMI ક્યારે છે?", hn: "Agli EMI kab hai?" },
+  advice: { en: "How can I save more?", hi: "ज़्यादा बचत कैसे करूं?", gu: "વધુ બચત કેવી રીતે કરું?", hn: "Zyada bachat kaise karun?" },
+  insights: { en: "Give me suggestions", hi: "मुझे सुझाव दो", gu: "મને સૂચનો આપો", hn: "Mujhe suggestions do" },
+  forecast: { en: "How much will be left at month end?", hi: "महीने के अंत तक कितना बचेगा?", gu: "મહિનાના અંતે કેટલું બચશે?", hn: "Mahine ke end tak kitna bachega?" },
+  health: { en: "How is my financial health?", hi: "मेरी फाइनेंशियल हेल्थ कैसी है?", gu: "મારી ફાઇનાન્શિયલ હેલ્થ કેવી છે?", hn: "Meri financial health kaisi hai?" },
+  rule_503020: { en: "Show my 50/30/20 split", hi: "मेरा 50/30/20 दिखाओ", gu: "મારો 50/30/20 બતાવો", hn: "Mera 50/30/20 dikhao" },
+  emergency_fund: { en: "How much emergency fund do I need?", hi: "मुझे कितना इमरजेंसी फंड चाहिए?", gu: "મારે કેટલું ઇમરજન્સી ફંડ જોઈએ?", hn: "Mujhe kitna emergency fund chahiye?" },
+  subscriptions: { en: "Show my recurring payments", hi: "मेरे फिक्स खर्च दिखाओ", gu: "મારા ફિક્સ ખર્ચ બતાવો", hn: "Mere fixed kharche dikhao" },
+  recent: { en: "Show my last transactions", hi: "आखिरी लेनदेन दिखाओ", gu: "છેલ્લા વ્યવહાર બતાવો", hn: "Last transactions dikhao" },
+  platform_summary: { en: "How many users are there?", hi: "कितने यूज़र हैं?", gu: "કેટલા યુઝર છે?", hn: "Kitne users hain?" },
+  visitors: { en: "How many visitors today?", hi: "आज कितने विज़िटर आए?", gu: "આજે કેટલા વિઝિટર આવ્યા?", hn: "Aaj kitne visitors aaye?" },
+};
+
+// ======================= admin: user management by voice / chat =======================
+/** "ravi ko block karo", "delete user ravi@x.com", "unblock ravi", "ravi ka password reset karo" — always confirmed first. */
+async function adminUserAction(intent: Intent, p: Parsed, inp: EngineInput, lang: Lang, ctx: AngelContext): Promise<{ reply: EngineReply; pending?: Pending | null }> {
+  const need: Permission = intent === "delete_user" ? "users.delete" : "users.update";
+  if (!inp.perms.includes(need)) return { reply: deny(lang, "perm") };
+  let { users } = await findMentionedUsers(p);
+  if (!users.length && p.hits.otherPronoun && ctx.lastUserId) {
+    const u = await loadUser(ctx.lastUserId);
+    if (u) users = [{ _id: String(u._id), name: u.name, email: u.email, plan: u.plan, role: u.role, status: u.status }];
+  }
+  if (!users.length && intent === "reset_password" && p.hits.self)
+    return { reply: reply(lang, L(lang, { en: "Change your own password in Settings → Change password (or use “Forgot password” on the sign-in page).", hi: "अपना पासवर्ड Settings → Change password में बदलिए (या साइन-इन पेज पर “Forgot password”)।", gu: "તમારો પાસવર્ડ Settings → Change password માં બદલો (અથવા સાઇન-ઇન પેજ પર “Forgot password”).", hn: "Apna password Settings → Change password mein badliye (ya sign-in page pe “Forgot password”)." })) };
+  if (!users.length)
+    return { reply: reply(lang, L(lang, { en: "Which user? Say their name or email.", hi: "कौन सा यूज़र? नाम या ईमेल बताइए।", gu: "કયો યુઝર? નામ કે ઈમેલ કહો.", hn: "Kaun sa user? Naam ya email bataiye." })) };
+  if (users.length > 1) {
+    const list = users.map((u, i) => `${i + 1}. ${u.name} (${u.email})`).join("\n");
+    return { reply: reply(lang, L(lang, { en: `I found more than one user — please say the email:\n${list}`, hi: `एक से ज़्यादा यूज़र मिले — ईमेल बताइए:\n${list}`, gu: `એકથી વધુ યુઝર મળ્યા — ઈમેલ કહો:\n${list}`, hn: `Ek se zyada users mile — email bataiye:\n${list}` })) };
+  }
+  const u = users[0];
+  if (u._id === String(inp.actor._id))
+    return { reply: reply(lang, L(lang, { en: "That's your own account — for safety, manage it in Settings.", hi: "ये आपका अपना अकाउंट है — सुरक्षा के लिए इसे Settings से संभालिए।", gu: "આ તમારું પોતાનું એકાઉન્ટ છે — સુરક્ષા માટે Settings માંથી સંભાળો.", hn: "Ye aapka apna account hai — safety ke liye ise Settings se manage kijiye." })) };
+  const full = await loadUser(u._id);
+  if (!full) return { reply: reply(lang, L(lang, { en: "User not found.", hi: "यूज़र नहीं मिला।", gu: "યુઝર મળ્યો નહીં.", hn: "User nahi mila." })) };
+  try {
+    assertCanManage(full, inp.perms);
+  } catch {
+    return { reply: deny(lang, "perm") };
+  }
+  ctx.lastUserId = u._id;
+  ctx.lastUserName = u.name;
+  const who = `${u.name} (${u.email})`;
+  let kind: ActionKind;
+  let payload: Record<string, unknown>;
+  let q: T4;
+  if (intent === "delete_user") {
+    kind = "delete_user";
+    payload = { userId: u._id, userName: u.name };
+    q = { en: `⚠️ Permanently delete ${who} and ALL their data (entries, goals, chats)? This cannot be undone.`, hi: `⚠️ ${who} और उनका सारा डेटा (एंट्री, गोल, चैट) हमेशा के लिए हटा दूं? ये वापस नहीं होगा।`, gu: `⚠️ ${who} અને તેમનો બધો ડેટા (એન્ટ્રી, ગોલ, ચેટ) કાયમ માટે કાઢી નાખું? આ પાછું નહીં થાય.`, hn: `⚠️ ${who} aur unka saara data (entries, goals, chats) hamesha ke liye delete kar dun? Ye wapas nahi hoga.` };
+  } else if (intent === "disable_user" || intent === "enable_user") {
+    const status = intent === "disable_user" ? "disabled" : "active";
+    if (u.status === status)
+      return { reply: reply(lang, L(lang, { en: `${who} is already ${status === "disabled" ? "blocked" : "active"}.`, hi: `${who} पहले से ${status === "disabled" ? "ब्लॉक" : "एक्टिव"} है।`, gu: `${who} પહેલેથી ${status === "disabled" ? "બ્લોક" : "એક્ટિવ"} છે.`, hn: `${who} pehle se ${status === "disabled" ? "blocked" : "active"} hai.` })) };
+    kind = "set_user_status";
+    payload = { userId: u._id, userName: u.name, status };
+    q = status === "disabled"
+      ? { en: `Block ${who}? They'll be signed out everywhere and can't log in until unblocked.`, hi: `${who} को ब्लॉक करूं? हर जगह से लॉगआउट होंगे और अनब्लॉक होने तक लॉगिन नहीं कर पाएंगे।`, gu: `${who} ને બ્લોક કરું? દરેક જગ્યાએથી લૉગઆઉટ થશે અને અનબ્લોક સુધી લૉગિન નહીં કરી શકે.`, hn: `${who} ko block karun? Har jagah se logout honge aur unblock hone tak login nahi kar payenge.` }
+      : { en: `Unblock ${who} so they can sign in again?`, hi: `${who} को अनब्लॉक करूं ताकि वो फिर लॉगिन कर सकें?`, gu: `${who} ને અનબ્લોક કરું જેથી ફરી લૉગિન કરી શકે?`, hn: `${who} ko unblock karun taaki wo phir login kar sakein?` };
+  } else {
+    kind = "reset_password";
+    payload = { userId: u._id, userName: u.name };
+    q = { en: `Reset ${who}'s password? I'll create a temporary password (shown once) and sign them out everywhere.`, hi: `${who} का पासवर्ड रीसेट करूं? मैं एक अस्थायी पासवर्ड बनाऊंगी (एक बार दिखेगा) और हर जगह से लॉगआउट कर दूंगी।`, gu: `${who} નો પાસવર્ડ રીસેટ કરું? હું કામચલાઉ પાસવર્ડ બનાવીશ (એક જ વાર દેખાશે) અને દરેક જગ્યાએથી લૉગઆઉટ કરીશ.`, hn: `${who} ka password reset karun? Main ek temporary password banaungi (ek baar dikhega) aur har jagah se logout kar dungi.` };
+  }
+  const action: StoredAction = { kind, status: "pending", summary: `${u.name}: ${kind.replace("_", " ")}`, ownerId: u._id, needsConfirm: true, payload };
+  return {
+    reply: reply(lang, L(lang, q), { action, suggestions: [L(lang, { en: "Yes", hi: "हाँ", gu: "હા", hn: "Haan" }), L(lang, { en: "No", hi: "नहीं", gu: "ના", hn: "Nahi" })] }),
+    pending: { kind: "confirm", action: { kind, ownerId: u._id, payload } },
+  };
 }
 
 // ======================= main entry =======================
@@ -1324,10 +1914,10 @@ const IDENTITY: T4 = {
 };
 
 const HELP: T4 = {
-  en: "Here's what I can do:\n• Answer: “What's my balance?”, “How much did I spend on food last month?”, “Where did my money go?”, “Next EMI?”\n• Think: “How can I save 1 lakh in 6 months?”, “Can I afford a ₹50,000 phone?”\n• Do: “Add 500 petrol”, “Salary 50000 received”, “Put 2000 in my bike goal”, “EMI paid”, “Undo”.\nI understand English, हिंदी and ગુજરાતી — by voice or text.",
-  hi: "मैं ये कर सकती हूं:\n• जवाब: “मेरा बैलेंस कितना है?”, “पिछले महीने खाने पर कितना खर्च हुआ?”, “पैसा कहां गया?”, “अगली EMI कब है?”\n• सलाह: “6 महीने में 1 लाख कैसे बचाऊं?”, “क्या मैं ₹50,000 का फोन ले सकता हूं?”\n• काम: “500 का पेट्रोल जोड़ो”, “50000 सैलरी आई”, “बाइक गोल में 2000 डालो”, “EMI भर दी”, “वापस लो”।\nमैं English, हिंदी और ગુજરાતી — बोलकर या लिखकर — समझती हूं।",
-  gu: "હું આ કરી શકું છું:\n• જવાબ: “મારું બેલેન્સ કેટલું છે?”, “ગયા મહિને ખાવામાં કેટલો ખર્ચ થયો?”, “પૈસા ક્યાં ગયા?”, “આગલી EMI ક્યારે છે?”\n• સલાહ: “6 મહિનામાં 1 લાખ કેવી રીતે બચાવું?”, “શું હું ₹50,000 નો ફોન લઈ શકું?”\n• કામ: “500 નું પેટ્રોલ ઉમેરો”, “પગાર 50000 આવ્યો”, “બાઇક ગોલમાં 2000 નાખો”, “EMI ભરી દીધી”, “પાછું કરો”.\nહું English, हिंदी અને ગુજરાતી — બોલીને કે લખીને — સમજું છું.",
-  hn: "Main ye kar sakti hoon:\n• Jawab: “Mera balance kitna hai?”, “Pichle mahine food pe kitna kharcha hua?”, “Paisa kahan gaya?”, “Agli EMI kab hai?”\n• Salah: “6 mahine mein 1 lakh kaise bachaun?”, “Kya main ₹50,000 ka phone le sakta hun?”\n• Kaam: “500 ka petrol add karo”, “50000 salary aayi”, “Bike goal mein 2000 daalo”, “EMI bhar di”, “Undo karo”.\nMain English, हिंदी aur ગુજરાતી — bolkar ya likhkar — samajhti hoon.",
+  en: "Here's what I can do:\n• Answer: “What's my balance?”, “Food spending last month?”, “Where did my money go?”, “Next EMI?”, “Am I over budget?”\n• Think: “Why did my spending go up?”, “How can I save 1 lakh in 6 months?”, “Can I afford a ₹50,000 phone?”, “Are my goals on track?”, “My 50/30/20 split”\n• Explain: “What is a SIP?”, “How much emergency fund do I need?”, “Avalanche or snowball?”\n• Do: “Add 500 petrol”, “Salary 50000 received”, “Food budget 5000”, “Put 2000 in my bike goal”, “EMI paid”, “Delete the swiggy expense”, “Undo”.\nI understand English, हिंदी, ગુજરાતી and Hinglish — by voice or text.",
+  hi: "मैं ये कर सकती हूं:\n• जवाब: “मेरा बैलेंस कितना है?”, “पिछले महीने खाने पर कितना खर्च हुआ?”, “पैसा कहां गया?”, “अगली EMI कब है?”, “बजट पार हुआ क्या?”\n• सोच-समझकर सलाह: “खर्च क्यों बढ़ा?”, “6 महीने में 1 लाख कैसे बचाऊं?”, “क्या मैं ₹50,000 का फोन ले सकता हूं?”, “मेरे गोल सही चल रहे हैं?”, “मेरा 50/30/20”\n• समझाना: “SIP क्या है?”, “इमरजेंसी फंड कितना चाहिए?”, “पहले कौन सा लोन चुकाऊं?”\n• काम: “500 का पेट्रोल जोड़ो”, “50000 सैलरी आई”, “खाने का बजट 5000”, “बाइक गोल में 2000 डालो”, “EMI भर दी”, “swiggy वाला खर्च हटाओ”, “वापस लो”।\nमैं English, हिंदी, ગુજરાતી और Hinglish — बोलकर या लिखकर — समझती हूं।",
+  gu: "હું આ કરી શકું છું:\n• જવાબ: “મારું બેલેન્સ કેટલું છે?”, “ગયા મહિને ખાવામાં કેટલો ખર્ચ થયો?”, “પૈસા ક્યાં ગયા?”, “આગલી EMI ક્યારે છે?”, “બજેટ પાર થયું?”\n• વિચારીને સલાહ: “ખર્ચ કેમ વધ્યો?”, “6 મહિનામાં 1 લાખ કેવી રીતે બચાવું?”, “શું હું ₹50,000 નો ફોન લઈ શકું?”, “મારા ગોલ બરાબર ચાલે છે?”, “મારો 50/30/20”\n• સમજાવવું: “SIP શું છે?”, “ઇમરજન્સી ફંડ કેટલું જોઈએ?”, “કઈ લોન પહેલાં ચૂકવું?”\n• કામ: “500 નું પેટ્રોલ ઉમેરો”, “પગાર 50000 આવ્યો”, “ખાવાનું બજેટ 5000”, “બાઇક ગોલમાં 2000 નાખો”, “EMI ભરી દીધી”, “swiggy વાળો ખર્ચ કાઢો”, “પાછું કરો”.\nહું English, हिंदी, ગુજરાતી અને Hinglish — બોલીને કે લખીને — સમજું છું.",
+  hn: "Main ye kar sakti hoon:\n• Jawab: “Mera balance kitna hai?”, “Pichle mahine food pe kitna kharcha hua?”, “Paisa kahan gaya?”, “Agli EMI kab hai?”, “Budget cross hua kya?”\n• Soch-samajh kar salah: “Kharcha kyu badha?”, “6 mahine mein 1 lakh kaise bachaun?”, “Kya main ₹50,000 ka phone le sakta hun?”, “Mere goals on track hain?”, “Mera 50/30/20”\n• Samjhana: “SIP kya hai?”, “Emergency fund kitna chahiye?”, “Pehle kaunsa loan chukaun?”\n• Kaam: “500 ka petrol add karo”, “50000 salary aayi”, “Food budget 5000”, “Bike goal mein 2000 daalo”, “EMI bhar di”, “Swiggy wala kharcha hatao”, “Undo karo”.\nMain English, हिंदी, ગુજરાતી aur Hinglish — bolkar ya likhkar — samajhti hoon.",
 };
 
 export async function respond(inp: EngineInput): Promise<EngineResult> {
@@ -1350,7 +1940,10 @@ async function respondInner(inp: EngineInput): Promise<EngineResult> {
   const hasLetters = /\p{L}/u.test(p.norm);
   // very short follow-ups ("food pe?") keep the conversation's language
   const shortFollowUp = p.tokens.length <= 3 && p.lang === "en" && !!ctx.lang;
-  const lang: Lang = inp.langPref !== "auto" ? inp.langPref : hasLetters && !shortFollowUp ? p.lang : ctx.lang ?? p.lang;
+  // Reply language: the language chosen in Angel's settings on this device → the account's saved language →
+  // the language the question was asked in (very short follow-ups keep the conversation's language).
+  const savedLang = inp.actor.replyLanguage && inp.actor.replyLanguage !== "auto" ? (inp.actor.replyLanguage as Lang) : null;
+  const lang: Lang = inp.langPref !== "auto" ? inp.langPref : savedLang ?? (hasLetters && !shortFollowUp ? p.lang : ctx.lang ?? p.lang);
   ctx.lang = lang;
   const first = inp.actor.name.split(" ")[0];
   let updateMessage: EngineResult["updateMessage"];
@@ -1393,12 +1986,17 @@ async function respondInner(inp: EngineInput): Promise<EngineResult> {
     if (pend.slot === "amount" || pend.slot === "emi") {
       const v = p.amount ?? (p.tokens.length === 1 && /^\d+(\.\d+)?$/.test(p.tokens[0]) ? Number(p.tokens[0]) : null);
       if (v) filled = pend.slot === "emi" ? { ...pend.action.payload, emiAmount: v } : { ...pend.action.payload, amount: v };
-    } else if (pend.slot === "goal" || pend.slot === "debt") {
+    } else if (pend.slot === "goal" || pend.slot === "debt" || pend.slot === "entry") {
       const opts = pend.options ?? [];
       const num = p.tokens.map((x) => Number(x)).find((n) => Number.isInteger(n) && n >= 1 && n <= opts.length);
       const byName = matchByName(opts, (o) => o.label, p.tokens);
-      const pick = num ? opts[num - 1] : byName.length === 1 ? byName[0] : null;
-      if (pick) filled = { ...pend.action.payload, [pend.slot === "goal" ? "goalId" : "debtId"]: pick.id };
+      const ordinal = /(^| )(first|pehla|pehli|pahela|pahelu|पहला|पहली|પહેલું|પહેલી)( |$)/.test(` ${p.tokens.join(" ")} `) ? 1 : /(^| )(second|dusra|dusri|bijo|biju|दूसरा|दूसरी|બીજું|બીજી)( |$)/.test(` ${p.tokens.join(" ")} `) ? 2 : null;
+      const pick = num ? opts[num - 1] : ordinal && opts[ordinal - 1] ? opts[ordinal - 1] : byName.length === 1 ? byName[0] : null;
+      if (pick) filled = { ...pend.action.payload, [pend.slot === "goal" ? "goalId" : pend.slot === "debt" ? "debtId" : "entryId"]: pick.id };
+    } else if (pend.slot === "category") {
+      const total = /(^| )(total|overall|monthly|month|mahine|mahina|महीने|કુલ|poora|pura|sab)( |$)/.test(` ${p.tokens.join(" ")} `);
+      const cat = p.expenseCategory ?? (total ? TOTAL : null);
+      if (cat) filled = { ...pend.action.payload, category: cat, ...(p.amount && !pend.action.payload.amount ? { amount: p.amount } : {}) };
     } else if (pend.slot === "user" && p.contentWords.length) {
       filled = { ...pend.action.payload, name: titleCase(p.contentWords.slice(0, 3).join(" ")) };
     } else if (pend.slot === "email" && p.email) filled = { ...pend.action.payload, email: p.email };
@@ -1409,7 +2007,7 @@ async function respondInner(inp: EngineInput): Promise<EngineResult> {
       const owner = isSelf ? inp.actor : await loadUser(pend.action.ownerId);
       if (!owner) return { reply: reply(lang, errorText(lang, new ApiError(404, "User not found."))), ctx };
       const t: Target = { scope: isSelf ? "self" : "user", owner, who: whoOf(isSelf, isSelf ? first : owner.name) };
-      const intentMap: Record<ActionKind, Intent> = { add_expense: "add_expense", add_income: "add_income", goal_contribute: "goal_contribute", pay_emi: "pay_emi", create_goal: "create_goal", create_debt: "create_debt", delete_record: "delete_last", create_user: "create_user", change_plan: "change_plan" };
+      const intentMap: Record<ActionKind, Intent> = { add_expense: "add_expense", add_income: "add_income", goal_contribute: "goal_contribute", goal_withdraw: "goal_withdraw", pay_emi: "pay_emi", create_goal: "create_goal", create_debt: "create_debt", delete_record: "delete_entry", edit_record: "edit_last", set_budget: "set_budget", create_user: "create_user", change_plan: "change_plan", delete_user: "delete_user", set_user_status: "disable_user", reset_password: "reset_password" };
       const r = await planAction(intentMap[pend.action.kind], parse("", today), inp, lang, t, cur, today, filled);
       ctx.pending = r.pending ?? null;
       return { reply: r.reply, ctx };
@@ -1472,7 +2070,36 @@ async function respondInner(inp: EngineInput): Promise<EngineResult> {
   if (intent === "undo") return { reply: reply(lang, ""), ctx, undo: true }; // the route finds the last action in the chat
 
   // ---------- 6. who is this about? ----------
-  const ACTIONS: Intent[] = ["add_expense", "add_income", "goal_contribute", "pay_emi", "create_goal", "create_debt", "delete_last"];
+  // ---------- 5a. deleting one's OWN account is never done by chat (needs password re-entry) ----------
+  if (intent === "delete_account") {
+    return {
+      reply: reply(lang, L(lang, {
+        en: "For your safety I can't delete your own account from chat. Go to Settings → Delete account (it asks for your password). If you only want to remove an entry, say e.g. “delete the swiggy expense”.",
+        hi: "सुरक्षा के लिए मैं चैट से आपका अपना अकाउंट डिलीट नहीं कर सकती। Settings → Delete account पर जाइए (पासवर्ड मांगेगा)। सिर्फ़ कोई एंट्री हटानी हो तो बोलिए, जैसे “swiggy वाला खर्च हटाओ”।",
+        gu: "સુરક્ષા માટે હું ચેટથી તમારું પોતાનું એકાઉન્ટ ડિલીટ નથી કરી શકતી. Settings → Delete account પર જાઓ (પાસવર્ડ માગશે). ફક્ત કોઈ એન્ટ્રી કાઢવી હોય તો કહો, જેમ કે “swiggy વાળો ખર્ચ કાઢો”.",
+        hn: "Safety ke liye main chat se aapka apna account delete nahi kar sakti. Settings → Delete account pe jaiye (password maangega). Sirf koi entry hatani ho to boliye, jaise “swiggy wala kharcha hatao”.",
+      })),
+      ctx,
+    };
+  }
+
+  // ---------- 5b. admin: visitors + user management ----------
+  if (intent === "visitors" || intent === "delete_user" || intent === "disable_user" || intent === "enable_user" || intent === "reset_password") {
+    if (inp.actor.role !== "admin") {
+      if (intent === "reset_password")
+        return { reply: reply(lang, L(lang, { en: "You can change your password in Settings → Change password. Forgot it? Use “Forgot password” on the sign-in page — a code is emailed to you.", hi: "पासवर्ड Settings → Change password में बदलिए। भूल गए? साइन-इन पेज पर “Forgot password” से ईमेल पर कोड आएगा।", gu: "પાસવર્ડ Settings → Change password માં બદલો. ભૂલી ગયા? સાઇન-ઇન પેજ પર “Forgot password” થી ઈમેલ પર કોડ આવશે.", hn: "Password Settings → Change password mein badliye. Bhool gaye? Sign-in page pe “Forgot password” se email pe code aayega." })), ctx };
+      return { reply: deny(lang, intent === "visitors" ? "admin" : "others"), ctx };
+    }
+    if (intent === "visitors") {
+      if (!inp.perms.includes("users.view")) return { reply: deny(lang, "perm"), ctx };
+      return { reply: await answerVisitors(lang, p.period, today), ctx };
+    }
+    const r = await adminUserAction(intent, p, inp, lang, ctx);
+    ctx.pending = r.pending ?? null;
+    return { reply: r.reply, ctx };
+  }
+
+  const ACTIONS: Intent[] = ["add_expense", "add_income", "goal_contribute", "goal_withdraw", "pay_emi", "create_goal", "create_debt", "delete_last", "delete_entry", "edit_last", "set_budget"];
   const wantsWrite = ACTIONS.includes(intent);
   const platformIntent = intent === "platform_summary" || intent === "list_users" || intent === "users_query" || intent === "top_users";
   if (platformIntent && inp.actor.role !== "admin") return { reply: deny(lang, p.hits.platform ? "others" : "admin"), ctx };
@@ -1532,13 +2159,31 @@ async function respondInner(inp: EngineInput): Promise<EngineResult> {
       out = await answerDebts(lang, t, cur, today);
       break;
     case "goals":
-      out = await answerGoals(lang, t, cur, today);
+      out = await answerGoals(lang, t, cur, today, p.contentWords);
       break;
     case "health":
       out = await answerHealth(lang, t);
       break;
     case "insights":
       out = await answerInsights(lang, t, cur);
+      break;
+    case "explain_change":
+      out = platform ? await answerPlatform(lang, cur, period) : await answerExplain(lang, t, cur, today);
+      break;
+    case "budget_status":
+      out = await answerBudgets(lang, t, cur, p.expenseCategory);
+      break;
+    case "rule_503020":
+      out = await answer503020(lang, t, cur, today);
+      break;
+    case "emergency_fund":
+      out = await answerEmergency(lang, t, cur, today);
+      break;
+    case "subscriptions":
+      out = await answerSubscriptions(lang, t, cur);
+      break;
+    case "kb":
+      out = await answerKb(lang, p.kbTopic ?? "budgeting", t, cur, today);
       break;
     case "forecast":
       out = await answerForecast(lang, t, cur, today);
@@ -1587,9 +2232,15 @@ async function respondInner(inp: EngineInput): Promise<EngineResult> {
       out = await answerUsersQuery(lang, p, today);
       break;
     default: {
-      // Nothing matched: answer kindly, say what Angel can do, and offer questions that fit THIS user.
+      // Nothing matched: answer kindly, say what Angel can do, and offer questions that fit THIS user —
+      // starting with what the learned model THINKS was meant ("Did you mean…?").
       const debts = await T.debtsOf(String(inp.actor._id));
+      const guesses = p.ml.ranked
+        .filter((r) => r.score >= 0.16 && DID_YOU_MEAN[r.intent] && (inp.actor.role === "admin" || !ADMIN_ONLY.has(r.intent)))
+        .slice(0, 2)
+        .map((r) => L(lang, DID_YOU_MEAN[r.intent]));
       const personal = [
+        ...guesses,
         L(lang, { en: "How am I doing this month?", hi: "इस महीने मेरा हिसाब बताओ", gu: "આ મહિને મારો હિસાબ બતાવો", hn: "Is mahine ka hisaab batao" }),
         debts.length ? L(lang, { en: "When is my next EMI?", hi: "अगली EMI कब है?", gu: "આગલી EMI ક્યારે છે?", hn: "Agli EMI kab hai?" }) : L(lang, { en: "Where did most of my money go?", hi: "सबसे ज़्यादा खर्च कहां हुआ?", gu: "સૌથી વધુ ખર્ચ ક્યાં થયો?", hn: "Sabse zyada kharcha kahan hua?" }),
         inp.actor.role === "admin" ? L(lang, { en: "How many users are there?", hi: "कितने यूज़र हैं?", gu: "કેટલા યુઝર છે?", hn: "Kitne users hain?" }) : L(lang, { en: "How can I save more?", hi: "ज़्यादा बचत कैसे करूं?", gu: "વધુ બચત કેવી રીતે કરું?", hn: "Zyada bachat kaise karun?" }),
@@ -1600,9 +2251,15 @@ async function respondInner(inp: EngineInput): Promise<EngineResult> {
         gu: `${first}, આ વાત હું બરાબર સમજી નહીં. હું તમારું બેલેન્સ, ખર્ચ, બચત, EMI અને ગોલ કહી શકું, બચતની સલાહ આપી શકું, અથવા “500 નું પેટ્રોલ” જેવું બોલો તો એન્ટ્રી ઉમેરી શકું. આ પૂછી જુઓ:`,
         hn: `${first}, ye baat main theek se samajh nahi paayi. Main aapka balance, kharcha, bachat, EMI aur goals bata sakti hoon, bachat ki salah de sakti hoon, ya “500 ka petrol” jaisa bolne pe entry add kar sakti hoon. Ye poochkar dekhiye:`,
       });
-      out = reply(lang, text, { speak: text.split(/[.।]/)[0], suggestions: personal });
+      const lead = guesses.length ? L(lang, { en: "Did you mean one of these? ", hi: "क्या आपका मतलब इनमें से कुछ था? ", gu: "શું તમારો મતલબ આમાંથી કંઈક હતો? ", hn: "Kya aapka matlab inme se kuch tha? " }) : "";
+      out = reply(lang, lead + text, { speak: (lead || text.split(/[.।]/)[0]), suggestions: personal.slice(0, 3) });
       return { reply: out, ctx };
     }
+  }
+  // ---------- 9. think: one short line of context (vs. your usual, money set aside in goals, …) ----------
+  if (["expense", "balance", "income", "savings"].includes(intent)) {
+    const extra = await thinkAbout(lang, intent, t, cur, period, category, today);
+    if (extra) out.text = `${out.text}\n${extra}`;
   }
   if (t.note) out.text = `${t.note}\n${out.text}`;
   if (QUERY_INTENTS.includes(intent)) {

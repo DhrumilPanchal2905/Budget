@@ -10,7 +10,9 @@ export type Card =
   | { type: "bars"; title?: string; items: { label: string; value: number; display: string }[] }
   | { type: "secret"; title: string; value: string; note: string };
 
-export type ActionKind = "add_expense" | "add_income" | "goal_contribute" | "pay_emi" | "create_goal" | "create_debt" | "delete_record" | "create_user" | "change_plan";
+export type ActionKind =
+  | "add_expense" | "add_income" | "goal_contribute" | "goal_withdraw" | "pay_emi" | "create_goal" | "create_debt" | "delete_record" | "edit_record" | "set_budget"
+  | "create_user" | "change_plan" | "delete_user" | "set_user_status" | "reset_password";
 export type ActionStatus = "pending" | "running" | "done" | "undoing" | "cancelled" | "undone" | "failed";
 
 /** What the browser sees about an action (internals such as undo data stay on the server). */

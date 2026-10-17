@@ -11,6 +11,7 @@ import {
 } from "./finance-config";
 import { ALL_PERMISSIONS } from "./permissions";
 import { PLAN_IDS } from "./plans";
+import { isCurrency } from "./currencies";
 
 // zod schemas only accept primitive types → objects like {"$gt": ""} are rejected (NoSQL injection safe).
 
@@ -72,6 +73,10 @@ export const dateOnly = (label: string) =>
 
 // ---------- Auth ----------
 export const registerSchema = z.object({ name: nameSchema, email: emailSchema, password: passwordSchema });
+export const otpCode = z.string({ required_error: "Enter the 6-digit code." }).trim().regex(/^\d{6}$/, "Enter the 6-digit code from the email.");
+export const registerVerifySchema = z.object({ email: emailSchema, otp: otpCode });
+export const emailOnlySchema = z.object({ email: emailSchema });
+export const resetPasswordSchema = z.object({ email: emailSchema, otp: otpCode, newPassword: passwordSchema });
 export const loginSchema = z.object({
   email: emailSchema,
   password: z.string().min(1, "Password is required.").max(128),
@@ -79,8 +84,9 @@ export const loginSchema = z.object({
 });
 export const profileSchema = z.object({
   name: nameSchema.optional(),
-  currency: z.enum(["INR", "USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD"]).optional(),
+  currency: z.string().trim().toUpperCase().refine(isCurrency, "Choose a valid currency.").optional(),
   theme: z.enum(["midnight", "graphite", "ocean", "emerald", "royal", "sunset", "light"]).optional(),
+  language: z.enum(["auto", "en", "hi", "gu", "hn"]).optional(),
 });
 export const changePasswordSchema = z
   .object({ currentPassword: z.string().min(1, "Current password is required.").max(128), newPassword: passwordSchema })
@@ -100,6 +106,7 @@ const incomeBase = z.object({
   amount: money("Amount"),
   date: dateOnly("Date"),
   recurring,
+  autoRepeat: z.boolean().optional().default(false),
   notes,
 });
 
@@ -109,6 +116,7 @@ const expenseBase = z.object({
   amount: money("Amount"),
   date: dateOnly("Date"),
   recurring,
+  autoRepeat: z.boolean().optional().default(false),
   notes,
 });
 
@@ -164,6 +172,7 @@ export const updateSchemas: Record<ResourceKey, z.ZodTypeAny> = {
     amount: money("Amount").optional(),
     date: dateOnly("Date").optional(),
     recurring: z.enum(RECURRING).optional(),
+    autoRepeat: z.boolean().optional(),
     notes: z.string().trim().max(1000).optional(),
   }),
   expense: z.object({
@@ -172,6 +181,7 @@ export const updateSchemas: Record<ResourceKey, z.ZodTypeAny> = {
     amount: money("Amount").optional(),
     date: dateOnly("Date").optional(),
     recurring: z.enum(RECURRING).optional(),
+    autoRepeat: z.boolean().optional(),
     notes: z.string().trim().max(1000).optional(),
   }),
   debt: z.object({
@@ -199,7 +209,32 @@ export const debtPaymentSchema = z.object({
   date: dateOnly("Payment date"),
 });
 
-export const goalContributionSchema = z.object({ amount: money("Contribution amount") });
+export const goalContributionSchema = z.object({
+  amount: money("Contribution amount"),
+  date: dateOnly("Date").optional(),
+  note: z.string().trim().max(200).optional().default(""),
+  withdraw: z.boolean().optional().default(false),
+});
+
+// ---------- Budgets ----------
+export const budgetSchema = z.object({
+  category: z.string().trim().refine((c) => c === "__total__" || (EXPENSE_CATEGORIES as readonly string[]).includes(c), "Choose a valid category."),
+  amount: money("Monthly limit").refine((m) => m > 0, "Limit must be greater than zero."),
+  alertPct: z.number().int().min(50).max(100).optional().default(80),
+});
+
+// ---------- Admin settings ----------
+export const emailSettingsSchema = z.object({
+  enabled: z.boolean().default(true),
+  fromName: z.string().trim().min(1).max(60).default("Budget Pro"),
+  fromEmail: emailSchema,
+  user: emailSchema,
+  password: z.string().trim().max(200).optional(), // empty → keep the saved one
+  host: z.string().trim().min(3).max(120).default("smtp.gmail.com"),
+  port: z.number().int().min(1).max(65535).default(465),
+  secure: z.boolean().optional(),
+});
+export const testEmailSchema = z.object({ to: emailSchema });
 
 // ---------- Admin ----------
 const permissionList = z.array(z.enum(ALL_PERMISSIONS)).max(ALL_PERMISSIONS.length);
@@ -232,7 +267,7 @@ export const broadcastSchema = z.object({
 });
 
 export const dbDeleteSchema = z.object({
-  collection: z.enum(["notifications", "auditlogs", "realtimeevents", "ratelimits", "sessions", "pushsubscriptions"]),
+  collection: z.enum(["notifications", "auditlogs", "realtimeevents", "ratelimits", "sessions", "pushsubscriptions", "visits", "emailotps"]),
   olderThanDays: z.number().int().min(0).max(3650).default(0),
   confirm: z.string(),
   password: z.string().min(1, "Password is required.").max(128),

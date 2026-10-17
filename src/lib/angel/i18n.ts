@@ -1,13 +1,14 @@
 // Angel AI — language helpers for replies (English, हिंदी, ગુજરાતી, Hinglish).
 import type { Lang } from "./parse";
 import type { Period } from "./dates";
+import { currencyLocale } from "../currencies";
 
 export type T4 = Record<Lang, string>;
 export const L = (lang: Lang, t: T4) => t[lang];
 
 /** "₹1,23,456" (Indian grouping) — or the user's currency. */
 export function money(major: number, currency = "INR"): string {
-  const locale = currency === "INR" ? "en-IN" : "en-US";
+  const locale = currencyLocale(currency);
   try {
     return new Intl.NumberFormat(locale, { style: "currency", currency, maximumFractionDigits: Number.isInteger(major) ? 0 : 2, minimumFractionDigits: 0 }).format(major);
   } catch {

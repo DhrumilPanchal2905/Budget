@@ -8,6 +8,7 @@ import { formatMoney } from "@/lib/money";
 import { useToast } from "./toast";
 import { useTheme } from "./providers";
 import type { ThemeId } from "@/lib/themes";
+import { openText, secureChannel } from "@/lib/secure-client";
 
 // ---------------- Session ----------------
 interface SessionCtx {
@@ -79,7 +80,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     (event: string, payload: Record<string, unknown>) => {
       switch (event) {
         case "finance:changed":
-          void mutate(startsWithAny(["/api/finance", "/api/dashboard", "/api/analytics", "/api/insights", "/api/plan", "/api/admin/users"]));
+          void mutate(startsWithAny(["/api/finance", "/api/dashboard", "/api/analytics", "/api/insights", "/api/plan", "/api/admin/users", "/api/budgets", "/api/goals"]));
           break;
         case "notification:new":
           void mutate(startsWithAny(["/api/notifications", "/api/dashboard"]));
@@ -87,6 +88,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
           break;
         case "admin:activity":
           void mutate(startsWithAny(["/api/admin/stats", "/api/admin/audit", "/api/admin/users", "/api/admin/database"]));
+          break;
+        case "visitor:new":
+          void mutate(startsWithAny(["/api/admin/visitors", "/api/admin/stats"]));
           break;
         case "profile:changed":
           void mutate(startsWithAny(["/api/auth/me", "/api/plan", "/api/insights", "/api/dashboard"]));
@@ -103,9 +107,12 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   handleRef.current = handle;
 
   useEffect(() => {
-    const events = ["finance:changed", "notification:new", "admin:activity", "profile:changed", "session:revoked"];
-    const parse = (s: string) => {
+    const events = ["finance:changed", "notification:new", "admin:activity", "profile:changed", "session:revoked", "visitor:new"];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let chan: any = null;
+    const parse = async (s: string): Promise<Record<string, unknown>> => {
       try {
+        if (chan && s && s[0] !== "{") return JSON.parse(await openText(chan, s)) as Record<string, unknown>;
         return JSON.parse(s) as Record<string, unknown>;
       } catch {
         return {};
@@ -137,11 +144,21 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     // and reopened when it becomes visible again; SWR refetches on focus, so nothing is missed.
     let es: EventSource | null = null;
     let lastId = "";
-    const open = () => {
+    let disposed = false;
+    const open = async () => {
       if (es) return;
       setMode("connecting");
+      chan = await secureChannel();
+      if (es || disposed || document.hidden) {
+        if (document.hidden && !es) setMode("connecting");
+        return;
+      }
       // resume from the last event we saw, so short hidden periods don't drop events
-      const s = new EventSource(lastId ? `/api/realtime/stream?lastEventId=${encodeURIComponent(lastId)}` : "/api/realtime/stream");
+      const qs = new URLSearchParams();
+      if (lastId) qs.set("lastEventId", lastId);
+      if (chan) qs.set("k", chan.pub);
+      const q = qs.toString();
+      const s = new EventSource(q ? `/api/realtime/stream?${q}` : "/api/realtime/stream");
       s.addEventListener("ready", () => setMode("live"));
       // Streams are recycled every ~55s (serverless limit); EventSource reconnects by itself and
       // resumes from Last-Event-ID, so only a CLOSED stream is reported as offline.
@@ -152,7 +169,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         s.addEventListener(ev, (e) => {
           const m = e as MessageEvent;
           if (m.lastEventId) lastId = m.lastEventId;
-          handleRef.current(ev, parse(m.data));
+          void parse(m.data).then((d) => handleRef.current(ev, d));
         });
       es = s;
     };
@@ -164,11 +181,12 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     const onVisibility = () => {
       clearTimeout(hideTimer);
       if (document.hidden) hideTimer = setTimeout(close, 30_000); // short tab switches keep the stream
-      else open();
+      else void open();
     };
-    open();
+    void open();
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
+      disposed = true;
       clearTimeout(hideTimer);
       document.removeEventListener("visibilitychange", onVisibility);
       close();

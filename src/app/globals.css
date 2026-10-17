@@ -239,3 +239,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------- Public content pages (SEO) ---------- */
+.prose-bp h1 { font-size: 2rem; line-height: 1.2; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 0.75rem; }
+.prose-bp h2 { font-size: 1.25rem; font-weight: 600; margin-top: 2rem; margin-bottom: 0.5rem; }
+.prose-bp h3 { font-size: 1rem; font-weight: 600; margin-top: 1.25rem; margin-bottom: 0.35rem; }
+.prose-bp p, .prose-bp li { color: rgb(var(--muted)); font-size: 0.95rem; line-height: 1.7; }
+.prose-bp p + p { margin-top: 0.75rem; }
+.prose-bp ul { list-style: disc; padding-left: 1.25rem; margin: 0.5rem 0; }
+.prose-bp ol { list-style: decimal; padding-left: 1.25rem; margin: 0.5rem 0; }
+.prose-bp a { color: rgb(var(--primary)); }
+.prose-bp strong { color: rgb(var(--fg)); }

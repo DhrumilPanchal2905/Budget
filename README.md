@@ -5,6 +5,41 @@ Production URL: **https://budget.dhrumilpanchal.in**
 
 ---
 
+## 🚀 What's new in v2 (read this first)
+
+| Area | What changed |
+|---|---|
+| **Angel AI brain** | New learning model (`src/lib/angel/brain/`) trained on multilingual example sentences + the existing rules. Understands new phrasings, typos and Hindi/Gujarati script by meaning. Benchmark on realistic questions: **60% → 100%**, and **100% on two held-out sets it never saw** (`npm run test:angel`). |
+| **Angel thinks** | Explains *why* (“kharcha kyu badha?”), compares with your usual, checks budgets & goals after answers, “Did you mean…?” when unsure, money knowledge (SIP, CIBIL, tax, emergency fund, 50/30/20, avalanche/snowball) in 4 languages. |
+| **Angel actions** | Set budgets, withdraw from goals, delete an entry by name, edit last amount; **admin**: block / unblock / delete users, reset passwords (temporary password shown once), visitors summary. All risky actions ask first. Users can never reach admin or other users' data. |
+| **Language** | Replies follow the language you ask in (English, हिंदी, ગુજરાતી, Hinglish) or the language chosen in Settings → Angel AI language. Suggestions (Insights + dashboard) are written in that language too. |
+| **Suggestions from Angel** | Insights page is now “Angel AI suggestions”: pace vs usual, budgets, emergency fund, goals behind schedule, 50/30/20, subscriptions… each with “Ask Angel” follow-ups. |
+| **Budgets** | New Budgets page: monthly limit per category (or whole month), left-per-day, month-end projection, alerts at 80%/100%, limits suggested from your last 3 months. |
+| **Accurate goals** | Goal ledger (every contribution/withdrawal with date), on-track status vs today, real saving pace, projected finish date, required monthly amount, withdraw + history. Dashboard shows *free balance* (balance − money set aside in goals). |
+| **Auto-repeat** | Salary/rent/SIP/bills can auto-add every month (opt-in per entry, never back-fills old months, idempotent). Runs in the daily cron. |
+| **Email OTP** | Sign-up creates the account only after a 6-digit email code. Forgot-password with email code. Admin-created users skip OTP. Sender changeable in **Admin → System settings** (no redeploy). |
+| **Encrypted API** | Every request/response body is AES-256-GCM encrypted (ECDH P-256 + HKDF) on top of HTTPS — the Network tab only shows `{"__e":"…"}`. SSE realtime events too. |
+| **Visitors** | Admin → Visitors (live): online now, unique visitors, countries, cities (approx. from IP via Vercel edge headers), devices, pages, latest visits, user sign-in locations. |
+| **Admin dashboard** | Overview now shows online visitors, new users, Angel usage, OTP-email status and the admin's own finances. User detail shows devices & locations. |
+| **Speed** | No index building on the request path in production (built once per deploy in the background), tuned Mongo connection, server warm-up while users read the landing/login page, lighter bundles. |
+| **SEO + AI SEO** | Rich landing page, Features / Angel AI / Pricing / FAQ / About / Privacy / Terms, 4 free calculators (EMI, 50/30/20, savings goal, SIP), JSON-LD (Organization, WebSite, SoftwareApplication, FAQPage, Breadcrumb), OG image, sitemap, robots that welcome AI crawlers, `/llms.txt` + `/llms-full.txt`. |
+| **World-wide** | 45+ currencies with correct local formatting. |
+
+### ✅ Deploy checklist for v2
+
+1. `npm install` (adds `nodemailer`; updates `package-lock.json`) → `npm run build` locally → commit → push.
+2. **Gmail App Password** for `dhrumilpanchal295@gmail.com`: Google Account → Security → turn on 2-Step Verification → **App passwords** → create one (16 characters).
+   Then either put it in Vercel env `SMTP_PASS`, **or** (easier, changeable later) sign in as admin → **Admin → System settings → Email sender** → paste it → *Send test*.
+   ⚠️ Until email works, new users cannot sign up (they'd never receive the code). Existing users and admin-created users are unaffected.
+3. Vercel → Environment Variables (Production): add `PAYLOAD_SECRET` (random 64 hex chars — `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`), optionally `SMTP_USER`, `SMTP_PASS`, `GOOGLE_SITE_VERIFICATION`.
+4. Redeploy. Indexes for the new collections are created automatically after the first request (or click **Admin → System settings → Optimise**).
+5. SEO: add the site in Google Search Console + Bing Webmaster Tools and submit `https://budget.dhrumilpanchal.in/sitemap.xml`.
+6. 🔐 **Security:** the old `.env.example` contained the real MongoDB and admin passwords. If it was ever pushed to GitHub, **change the MongoDB Atlas DB user password and the admin password now** and update Vercel env vars.
+
+Live data: every change is additive (new fields have safe defaults, new collections are separate). No existing record is rewritten; auto-repeat is off for all existing entries until you switch it on.
+
+---
+
 ## ⚡ Quick start (local)
 
 ```bash
@@ -115,6 +150,11 @@ All responses: `{ "success": boolean, "message"?: string, "data"?: ..., "errors"
 | `NEXT_PUBLIC_PUSHER_KEY`, `NEXT_PUBLIC_PUSHER_CLUSTER` | – | public | Pusher key/cluster (not secret) |
 | `SESSION_DAYS` | – | server | idle session lifetime, default 7 |
 | `APP_TIMEZONE` | – | server | default `Asia/Kolkata` (defines "current month") |
+| `SMTP_USER` / `SMTP_PASS` | ✅ for sign-ups | server | Gmail address + 16-char App Password for OTP emails (or set in Admin → System settings) |
+| `MAIL_FROM_NAME`, `SMTP_HOST`, `SMTP_PORT` | – | server | defaults: Budget Pro, smtp.gmail.com, 465 |
+| `PAYLOAD_SECRET` | recommended | server | secret for the encrypted API channel + encrypting saved settings |
+| `REQUIRE_ENCRYPTED_API` | – | server | `true` = reject unencrypted write requests |
+| `GOOGLE_SITE_VERIFICATION`, `BING_SITE_VERIFICATION` | – | server | search-console verification codes |
 
 Use `.env.local` for development and Vercel's **Production** environment for production — different databases are recommended (e.g. `budgetpro_dev` vs `budgetpro`).
 
@@ -209,7 +249,9 @@ Angel is Budget Pro's **own** assistant — no OpenAI/Gemini/any third-party AI.
 
 **Switch off instantly:** set `ANGEL_ENABLED=false` in Vercel env vars.
 
-**Tests:** `npm run test:angel` (language understanding, voice transcripts in हिंदी/ગુજરાતી script, wake word — 198 checks, no database needed).
+**Tests:** `npm run test:angel` — 198 rule/voice/wake-word checks + the understanding benchmark (121 realistic questions + 135 held-out questions never used in training). No database needed.
+
+**How the brain works (v2):** `parse.ts` first applies precise rules (amounts, dates, categories, people, verbs). Then `brain/classifier.ts` — a TF-IDF nearest-neighbour model trained at startup on `brain/corpus.ts` (English, हिंदी, ગુજરાતી, Hinglish, romanised Gujarati) — scores the meaning of the whole sentence. Native-script words are also transliterated, so a Hindi-script question matches Hinglish examples. The model decides when the rules found nothing, refines weak rule guesses, and answers general questions from `brain/knowledge.ts`. **To teach Angel a new way of asking, add a sentence to `corpus.ts`.**
 
 ## 14. Performance changes
 

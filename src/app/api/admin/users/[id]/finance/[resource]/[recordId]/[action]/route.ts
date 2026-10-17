@@ -1,6 +1,6 @@
 import { route } from "@/lib/api";
 import { loadTargetUser } from "@/lib/admin-target";
-import { handleAction, resourceParam } from "@/lib/finance-handlers";
+import { handleAction, handleGetAction, resourceParam } from "@/lib/finance-handlers";
 
 export const runtime = "nodejs";
 
@@ -8,4 +8,10 @@ export const POST = route({ admin: true, perms: ["users.finance.view", "users.fi
   const resource = resourceParam(ctx.params.resource);
   const owner = await loadTargetUser(ctx.params.id);
   return handleAction(ctx, owner, resource, String(ctx.params.recordId), String(ctx.params.action));
+});
+
+export const GET = route({ admin: true, perms: ["users.finance.view"] }, async (ctx) => {
+  const resource = resourceParam(ctx.params.resource);
+  const owner = await loadTargetUser(ctx.params.id);
+  return handleGetAction(ctx, owner, resource, String(ctx.params.recordId), String(ctx.params.action));
 });

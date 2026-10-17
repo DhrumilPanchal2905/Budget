@@ -1,5 +1,6 @@
 // Money is stored as INTEGER minor units (paise/cents) to avoid floating point errors.
 // All sums happen on integers in MongoDB; we only convert to decimals at the edges.
+import { currencyLocale } from "./currencies";
 
 export const MAX_AMOUNT_MAJOR = 1_000_000_000_000; // 1 lakh crore — sane upper bound
 
@@ -26,7 +27,7 @@ export function fromMinor(minor: number | null | undefined): number {
 }
 
 export function formatMoney(major: number, currency = "INR", compact = false): string {
-  const locale = currency === "INR" ? "en-IN" : "en-US";
+  const locale = currencyLocale(currency);
   try {
     return new Intl.NumberFormat(locale, {
       style: "currency",

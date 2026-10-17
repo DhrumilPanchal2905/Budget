@@ -1,7 +1,7 @@
 import type { Types } from "mongoose";
 import { AngelConversation, AngelMessage, AuditLog, Notification, Passkey, PushSubscription, Session, User, oid, type UserDoc } from "./models";
 import { purgeUserFinance } from "./finance";
-import { effectivePermissions } from "./permissions";
+import { effectivePermissions, isAdminPermission } from "./permissions";
 import { Errors } from "./errors";
 
 /**
@@ -31,6 +31,12 @@ export async function assertNotLastAdmin(target: Pick<UserDoc, "_id" | "role" | 
   if (others === 0) {
     throw Errors.badRequest(`You cannot ${action} the last active administrator.`);
   }
+}
+
+/** An admin may not modify/delete another admin who holds admin permissions the actor lacks (prevents takeover). */
+export function assertCanManage(target: Pick<UserDoc, "role" | "permissions">, actorPerms: readonly string[]) {
+  if (target.role !== "admin") return;
+  if ((target.permissions ?? []).some((p) => isAdminPermission(p) && !actorPerms.includes(p))) throw Errors.forbidden();
 }
 
 export function adminUserView(u: UserDoc) {

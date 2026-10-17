@@ -4,32 +4,40 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { themeScript } from "@/lib/themes";
+import { AUTHOR, DESCRIPTION, KEYWORDS, SITE_NAME, SITE_URL, TAGLINE } from "@/lib/seo";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans", display: "swap" });
 
-const siteUrl = process.env.APP_URL || "https://budget.dhrumilpanchal.in";
-
 export const metadata: Metadata = {
-  metadataBase: new URL(siteUrl),
-  title: { default: "Budget Pro — Personal finance, beautifully organised", template: "%s · Budget Pro" },
-  description:
-    "Budget Pro is a secure personal finance app to track salary, expenses, EMIs, savings goals and get realtime insights — with professional dashboards and charts.",
-  applicationName: "Budget Pro",
-  keywords: ["budget", "personal finance", "expense tracker", "EMI tracker", "savings goals", "money manager", "India"],
+  metadataBase: new URL(SITE_URL),
+  title: { default: `${SITE_NAME} — ${TAGLINE}`, template: `%s · ${SITE_NAME}` },
+  description: DESCRIPTION,
+  applicationName: SITE_NAME,
+  keywords: KEYWORDS,
+  authors: [{ name: AUTHOR.name, url: AUTHOR.url }],
+  creator: AUTHOR.name,
+  publisher: SITE_NAME,
+  category: "finance",
+  alternates: { canonical: "/" },
+  robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1, "max-video-preview": -1 } },
   openGraph: {
     type: "website",
-    url: siteUrl,
-    siteName: "Budget Pro",
-    title: "Budget Pro — Personal finance, beautifully organised",
-    description: "Track income, expenses, EMIs and savings goals with realtime dashboards and smart insights.",
+    url: SITE_URL,
+    siteName: SITE_NAME,
+    locale: "en_IN",
+    alternateLocale: ["hi_IN", "gu_IN"],
+    title: `${SITE_NAME} — ${TAGLINE}`,
+    description: DESCRIPTION,
   },
-  twitter: {
-    card: "summary_large_image",
-    title: "Budget Pro",
-    description: "Track income, expenses, EMIs and savings goals with realtime dashboards and smart insights.",
-  },
+  twitter: { card: "summary_large_image", title: SITE_NAME, description: DESCRIPTION },
   icons: { icon: "/icon.svg" },
   manifest: "/manifest.webmanifest",
+  formatDetection: { telephone: false },
+  verification: {
+    ...(process.env.GOOGLE_SITE_VERIFICATION ? { google: process.env.GOOGLE_SITE_VERIFICATION } : {}),
+    ...(process.env.BING_SITE_VERIFICATION ? { other: { "msvalidate.01": process.env.BING_SITE_VERIFICATION } } : {}),
+  },
+  other: { "ai-content-declaration": "Budget Pro product site; see /llms.txt" },
 };
 
 export const viewport: Viewport = {
@@ -44,6 +52,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en" data-theme="midnight" className={inter.variable} suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <link rel="alternate" type="text/plain" href="/llms.txt" title="LLM-friendly site summary" />
       </head>
       <body className="min-h-screen font-sans">
         <Providers>{children}</Providers>

@@ -28,7 +28,7 @@ export const POST = route({ auth: false }, async ({ req, ip }) => {
     await promoteIfBootstrapAdmin(user, ip);
     user.lastLoginAt = new Date();
     await user.save();
-    const token = await createSession(String(user._id), ip, req.headers.get("user-agent") || "", { remember, method: "password" });
+    const token = await createSession(String(user._id), ip, req.headers.get("user-agent") || "", { remember, method: "password", headers: req.headers });
     await audit({ actor: user, action: "auth.login", resource: "user", resourceId: String(user._id), targetUserId: String(user._id), metadata: { remember }, ip });
 
     const lean = user.toObject();

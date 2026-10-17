@@ -12,13 +12,14 @@ export const runtime = "nodejs";
 /** Current user / session. */
 export const GET = route({}, async ({ user, perms }) => ok({ user: publicUser(user, perms) }));
 
-/** Update own profile (name, currency, theme). Role/plan/permissions can NEVER be changed here. */
+/** Update own profile (name, currency, theme, language). Role/plan/permissions can NEVER be changed here. */
 export const PATCH = route({ perms: ["settings.write"] }, async ({ req, user, ip }) => {
   const data = await parseBody(req, profileSchema);
   const update: Record<string, string> = {};
   if (data.name !== undefined) update.name = data.name;
   if (data.currency !== undefined) update.currency = data.currency;
   if (data.theme !== undefined) update.theme = data.theme;
+  if (data.language !== undefined) update.replyLanguage = data.language;
   if (!Object.keys(update).length) throw Errors.badRequest("Nothing to update.");
 
   const updated = await User.findByIdAndUpdate(user._id, { $set: update }, { new: true }).lean<UserDoc>();

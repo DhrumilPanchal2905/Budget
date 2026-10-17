@@ -1,5 +1,5 @@
 import type { Model, Types } from "mongoose";
-import { Debt, Expense, Goal, Income, oid, isObjectId, type UserDoc } from "./models";
+import { Budget, Debt, Expense, Goal, GoalContribution, Income, oid, isObjectId, type UserDoc } from "./models";
 import { DATE_FIELDS, MONEY_FIELDS, RESOURCES, type ResourceKey } from "./finance-config";
 import { fromMinor } from "./money";
 import { limitLabel, planForUser } from "./plans";
@@ -8,7 +8,10 @@ import type { Permission } from "./permissions";
 import { createSchemas, updateSchemas } from "./validation";
 import { audit } from "./audit";
 import { publish, userChannel } from "./realtime";
-import { notifyUser } from "./notify";
+import { notifyUser, runAfter } from "./notify";
+import { checkBudgetAlerts } from "./budgets";
+import { goalInsight } from "./goals";
+export { goalInsight, type GoalInsight } from "./goals";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const MODELS: Record<ResourceKey, Model<any>> = { income: Income, expense: Expense, debt: Debt, goal: Goal };
@@ -21,7 +24,7 @@ export function requiredPerms(resource: ResourceKey, action: "view" | "create" |
 const toDateStr = (d: Date | string | null | undefined) => (d ? new Date(d).toISOString().slice(0, 10) : null);
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function serializeRecord(resource: ResourceKey, doc: any) {
+export function serializeRecord(resource: ResourceKey, doc: any, paceMinor?: number | null) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const out: Record<string, any> = { id: String(doc._id) };
   for (const f of RESOURCES[resource].fields) out[f.name] = doc[f.name] ?? (f.type === "text" || f.type === "textarea" ? "" : null);
@@ -29,6 +32,12 @@ export function serializeRecord(resource: ResourceKey, doc: any) {
   for (const f of DATE_FIELDS[resource]) out[f] = toDateStr(doc[f]);
   if (resource === "goal") {
     out.progress = doc.targetAmount ? Math.min(100, Math.round((doc.currentAmount / doc.targetAmount) * 1000) / 10) : 0;
+    out.insight = goalInsight(doc, paceMinor);
+  }
+  if (resource === "income" || resource === "expense") {
+    out.autoRepeat = Boolean(doc.autoRepeat);
+    out.recurrenceNext = doc.autoRepeat && doc.recurrenceNext ? toDateStr(doc.recurrenceNext) : null;
+    out.autoAdded = Boolean(doc.recurringParentId);
   }
   if (resource === "debt") {
     out.paidAmount = fromMinor(Math.max(0, (doc.totalAmount ?? 0) - (doc.remainingAmount ?? 0)));
@@ -38,6 +47,63 @@ export function serializeRecord(resource: ResourceKey, doc: any) {
   out.createdAt = doc.createdAt;
   out.updatedAt = doc.updatedAt;
   return out;
+}
+
+const MONTH_MS = 30.4375 * 86400000;
+
+/** Average monthly NET contribution per goal over the last 90 days (from the goal ledger). */
+export async function goalPaces(goalIds: unknown[]): Promise<Map<string, number>> {
+  if (!goalIds.length) return new Map();
+  const since = new Date(Date.now() - 90 * 86400000);
+  const rows = await GoalContribution.aggregate([
+    { $match: { goalId: { $in: goalIds }, date: { $gte: since }, source: { $nin: ["initial", "edit"] } } },
+    { $group: { _id: "$goalId", t: { $sum: "$amount" }, first: { $min: "$date" } } },
+  ]);
+  const out = new Map<string, number>();
+  for (const r of rows as { _id: unknown; t: number; first: Date }[]) {
+    const months = Math.max(1, Math.min(3, (Date.now() - new Date(r.first).getTime()) / MONTH_MS));
+    out.set(String(r._id), r.t / months);
+  }
+  return out;
+}
+
+// ---------------- Auto-repeat (recurring) ----------------
+/** Next occurrence. `anchorDay` = the original day-of-month (so a 31st entry goes 31 Jan → 28 Feb → 31 Mar, no drift). */
+export function stepDate(d: Date, recurring: string, anchorDay?: number): Date {
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  const day = anchorDay ?? d.getUTCDate();
+  if (recurring === "weekly") return new Date(d.getTime() + 7 * 86400000);
+  if (recurring === "yearly") {
+    const last = new Date(Date.UTC(y + 1, m + 1, 0)).getUTCDate();
+    return new Date(Date.UTC(y + 1, m, Math.min(day, last)));
+  }
+  const last = new Date(Date.UTC(y, m + 2, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m + 1, Math.min(day, last)));
+}
+
+/** First repeat date that is after both the entry's own date and today (never back-fills old months). */
+export function firstRecurrence(date: Date, recurring: string, today: Date): Date {
+  const anchor = date.getUTCDate();
+  let next = stepDate(date, recurring, anchor);
+  let guard = 0;
+  while (next.getTime() <= today.getTime() && guard++ < 600) next = stepDate(next, recurring, anchor);
+  return next;
+}
+
+function todayUtcMidnight(): Date {
+  const n = new Date();
+  return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()));
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyRecurrence(doc: any) {
+  if (doc.autoRepeat && doc.recurring && doc.recurring !== "none") {
+    doc.recurrenceNext = firstRecurrence(new Date(doc.date), doc.recurring, todayUtcMidnight());
+  } else {
+    doc.autoRepeat = false;
+    doc.recurrenceNext = undefined;
+  }
 }
 
 function escapeRegex(s: string) {
@@ -94,8 +160,9 @@ export async function listRecords(ownerId: string, resource: ResourceKey, query:
     model.aggregate([{ $match: filter }, { $group: { _id: null, total: { $sum: `$${amountField}` } } }]),
   ]);
 
+  const paces = resource === "goal" ? await goalPaces(items.map((d) => d._id)) : null;
   return {
-    items: items.map((d) => serializeRecord(resource, d)),
+    items: items.map((d) => serializeRecord(resource, d, paces ? paces.get(String(d._id)) ?? null : undefined)),
     total,
     page,
     pages: Math.max(1, Math.ceil(total / limit)),
@@ -174,9 +241,15 @@ export async function createRecord(actor: Actor, owner: UserDoc, resource: Resou
   await assertPlanCapacity(owner, resource);
   if (resource === "goal" && data.currentAmount >= data.targetAmount && data.status === "active") data.status = "achieved";
   if (resource === "debt" && data.remainingAmount === 0) data.status = "closed";
-  const doc = await MODELS[resource].create({ ...data, userId: owner._id });
+  const doc = new MODELS[resource]({ ...data, userId: owner._id });
+  if (resource === "income" || resource === "expense") applyRecurrence(doc);
+  await doc.save();
+  if (resource === "goal" && doc.currentAmount > 0) {
+    await GoalContribution.create({ userId: owner._id, goalId: doc._id, amount: doc.currentAmount, date: new Date(), note: "Starting amount", source: "initial" });
+  }
   const label = doc[RESOURCES[resource].titleField];
   await afterChange(actor, owner, resource, "create", String(doc._id), label, amountMeta(resource, doc));
+  if (resource === "expense") runAfter(() => checkBudgetAlerts(owner, doc.category));
   return serializeRecord(resource, doc.toObject());
 }
 
@@ -199,7 +272,9 @@ export async function updateRecord(actor: Actor, owner: UserDoc, resource: Resou
   for (const k of Object.keys(data)) if (data[k] === undefined) delete data[k];
   if (!Object.keys(data).length) throw Errors.badRequest("Nothing to update.");
   const doc = await findOwned(String(owner._id), resource, id);
+  const beforeAmount = resource === "goal" ? doc.currentAmount : 0;
   doc.set(data);
+  if ((resource === "income" || resource === "expense") && ("autoRepeat" in data || "recurring" in data || "date" in data)) applyRecurrence(doc);
 
   if (resource === "debt") {
     if (doc.remainingAmount > doc.totalAmount) throw Errors.badRequest("Remaining amount cannot exceed total amount.", { remainingAmount: "Remaining amount cannot exceed total amount." });
@@ -208,8 +283,12 @@ export async function updateRecord(actor: Actor, owner: UserDoc, resource: Resou
   if (resource === "goal" && doc.currentAmount >= doc.targetAmount && doc.status === "active") doc.status = "achieved";
 
   await doc.save();
+  if (resource === "goal" && doc.currentAmount !== beforeAmount) {
+    await GoalContribution.create({ userId: owner._id, goalId: doc._id, amount: doc.currentAmount - beforeAmount, date: new Date(), note: "Saved amount edited", source: "edit" });
+  }
   const label = doc[RESOURCES[resource].titleField];
   await afterChange(actor, owner, resource, "update", String(doc._id), label, { fields: Object.keys(data) });
+  if (resource === "expense") runAfter(() => checkBudgetAlerts(owner, doc.category));
   return serializeRecord(resource, doc.toObject());
 }
 
@@ -221,6 +300,7 @@ export async function deleteRecord(actor: Actor, owner: UserDoc, resource: Resou
     // Keep payment history (expenses) but unlink them from the deleted debt.
     await Expense.updateMany({ userId: owner._id, debtId: doc._id }, { $unset: { debtId: 1 } });
   }
+  if (resource === "goal") await GoalContribution.deleteMany({ userId: owner._id, goalId: doc._id });
   await afterChange(actor, owner, resource, "delete", id, label, amountMeta(resource, doc));
   return { id };
 }
@@ -295,20 +375,40 @@ export async function payDebt(actor: Actor, owner: UserDoc, debtId: string, amou
   return serializeRecord("debt", debt.toObject());
 }
 
-/** Adds money to a savings goal; marks achieved + notifies when the target is reached. */
-export async function contributeGoal(actor: Actor, owner: UserDoc, goalId: string, amount: number) {
-  if (amount <= 0) throw Errors.badRequest("Contribution must be greater than zero.", { amount: "Contribution must be greater than zero." });
+/**
+ * Adds money to a savings goal (or takes it out with `withdraw`). Every movement is written to the goal ledger
+ * with its date, so history and the real saving pace are exact. Marks achieved + notifies at 100%.
+ */
+export async function contributeGoal(
+  actor: Actor,
+  owner: UserDoc,
+  goalId: string,
+  amount: number,
+  opts: { withdraw?: boolean; date?: Date; note?: string; source?: "app" | "angel" | "admin" } = {},
+) {
+  if (amount <= 0) throw Errors.badRequest("Amount must be greater than zero.", { amount: "Amount must be greater than zero." });
   const goal = await findOwned(String(owner._id), "goal", goalId);
   if (goal.status === "cancelled") throw Errors.badRequest("This goal is cancelled.");
+  if (opts.withdraw && amount > goal.currentAmount) throw Errors.badRequest("You can't withdraw more than the goal holds.", { amount: "More than the saved amount." });
   const wasAchieved = goal.currentAmount >= goal.targetAmount;
-  goal.currentAmount += amount;
+  goal.currentAmount += opts.withdraw ? -amount : amount;
   const nowAchieved = goal.currentAmount >= goal.targetAmount;
-  if (nowAchieved) goal.status = "achieved";
+  if (nowAchieved && goal.status !== "paused") goal.status = "achieved";
+  if (!nowAchieved && goal.status === "achieved") goal.status = "active";
   await goal.save();
+  const byAdmin = String(actor.user._id) !== String(owner._id);
+  await GoalContribution.create({
+    userId: owner._id,
+    goalId: goal._id,
+    amount: opts.withdraw ? -amount : amount,
+    date: opts.date ?? new Date(),
+    note: (opts.note ?? "").slice(0, 200),
+    source: opts.source ?? (byAdmin ? "admin" : "app"),
+  });
 
   await audit({
     actor: actor.user,
-    action: String(actor.user._id) === String(owner._id) ? "finance.goal.contribution" : "admin.finance.goal.contribution",
+    action: `${byAdmin ? "admin." : ""}finance.goal.${opts.withdraw ? "withdrawal" : "contribution"}`,
     resource: "goal",
     resourceId: String(goal._id),
     targetUserId: String(owner._id),
@@ -324,7 +424,16 @@ export async function contributeGoal(actor: Actor, owner: UserDoc, goalId: strin
       link: "/goals",
     });
   }
-  return serializeRecord("goal", goal.toObject());
+  const paces = await goalPaces([goal._id]);
+  return serializeRecord("goal", goal.toObject(), paces.get(String(goal._id)) ?? null);
+}
+
+/** Ledger of one goal (newest first). */
+export async function goalHistory(ownerId: string, goalId: string) {
+  await findOwned(ownerId, "goal", goalId);
+  const rows = await GoalContribution.find({ userId: oid(ownerId), goalId: oid(goalId) }).sort({ date: -1, createdAt: -1 }).limit(200).lean();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return rows.map((r: any) => ({ id: String(r._id), amount: fromMinor(r.amount), date: toDateStr(r.date), note: r.note ?? "", source: r.source }));
 }
 
 /** Removes every finance record of a user (account deletion / admin delete user). */
@@ -335,5 +444,7 @@ export async function purgeUserFinance(userId: Types.ObjectId | string) {
     Expense.deleteMany({ userId: id }),
     Debt.deleteMany({ userId: id }),
     Goal.deleteMany({ userId: id }),
+    Budget.deleteMany({ userId: id }),
+    GoalContribution.deleteMany({ userId: id }),
   ]);
 }

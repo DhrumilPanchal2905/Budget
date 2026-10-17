@@ -5,6 +5,7 @@ import { SWRConfig } from "swr";
 import { fetcher } from "@/lib/client";
 import { THEMES, THEME_STORAGE_KEY, type ThemeId } from "@/lib/themes";
 import { ToastProvider } from "./toast";
+import { VisitTracker } from "./tracker";
 
 // ---------------- Theme ----------------
 interface ThemeCtx {
@@ -63,7 +64,10 @@ export function Providers({ children }: { children: ReactNode }) {
       }}
     >
       <ThemeProvider>
-        <ToastProvider>{children}</ToastProvider>
+        <ToastProvider>
+          {children}
+          <VisitTracker />
+        </ToastProvider>
       </ThemeProvider>
     </SWRConfig>
   );

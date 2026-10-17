@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import useSWR from "swr";
-import { Activity, Crown, Database, IndianRupee, ScrollText, UserCheck, UserX, Users } from "lucide-react";
+import { Activity, Bot, Crown, Database, Globe, HeartPulse, IndianRupee, Mail, Radio, ScrollText, TrendingDown, TrendingUp, UserCheck, UserPlus, UserX, Users, Wallet } from "lucide-react";
 import { RequirePerm } from "@/components/guard";
 import { useSession } from "@/components/session";
 import { StatCard } from "@/components/stat";
@@ -16,6 +16,38 @@ interface Stats {
   finance: { totalIncome: number; totalExpense: number; avgIncomePerUser: number };
   signups: { label: string; users: number }[];
   recent: { id: string; action: string; actorEmail: string; resource: string | null; createdAt: string }[];
+  live?: { onlineNow: number; visitors24h: number; newUsers7d: number; unverified: number };
+  angel?: { conversations: number; questions7d: number };
+  email?: { ready: boolean; source: string; from: string };
+}
+
+interface MyDash {
+  monthLabel: string;
+  summary: { income: number; expense: number; balance: number; totalSavings: number; freeBalance: number; goalSaved: number; totalDebt: number; savingsRate: number };
+  health: { score: number | null };
+}
+
+/** The admin's OWN money (admins are users too) — same numbers as their dashboard. */
+function MyFinances() {
+  const { money, can } = useSession();
+  const { data } = useSWR<MyDash>(can("finance.read") ? "/api/dashboard" : null);
+  if (!can("finance.read")) return null;
+  return (
+    <Card>
+      <CardHeader title={<span className="flex items-center gap-2"><Wallet className="h-4 w-4 text-primary" /> Your own finances</span>} subtitle={data ? data.monthLabel : "This month"} action={<Link href="/dashboard" className="text-xs font-medium text-primary hover:underline">My dashboard</Link>} />
+      {!data ? (
+        <div className="p-5"><Skeleton className="h-16" /></div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-5">
+          <div><p className="text-xs text-muted">Income</p><p className="tabular font-semibold text-success">{money(data.summary.income, true)}</p></div>
+          <div><p className="text-xs text-muted">Expenses</p><p className="tabular font-semibold">{money(data.summary.expense, true)}</p></div>
+          <div><p className="text-xs text-muted">Left this month</p><p className="tabular font-semibold">{money(data.summary.balance, true)}</p></div>
+          <div><p className="text-xs text-muted">Total balance</p><p className="tabular font-semibold">{money(data.summary.totalSavings, true)}</p></div>
+          <div><p className="text-xs text-muted">Health</p><p className="tabular font-semibold">{data.health.score ?? "—"}/100</p></div>
+        </div>
+      )}
+    </Card>
+  );
 }
 
 const LABELS: Record<string, string> = {
@@ -30,6 +62,15 @@ const LABELS: Record<string, string> = {
   pushsubscriptions: "Push subscriptions",
   realtimeevents: "Realtime events",
   ratelimits: "Rate-limit buckets",
+  passkeys: "Passkeys (device login)",
+  webauthnchallenges: "Passkey challenges",
+  angelconversations: "Angel AI chats",
+  angelmessages: "Angel AI messages",
+  budgets: "Budgets",
+  goalcontributions: "Goal contributions",
+  visits: "Website visits",
+  emailotps: "Pending email codes",
+  appsettings: "App settings",
 };
 
 function Inner() {
@@ -54,6 +95,15 @@ function Inner() {
   ];
   return (
     <div className="space-y-4">
+      {data.live && (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Link href="/admin/visitors"><StatCard label="Online now" value={data.live.onlineNow} icon={<Radio className="h-4 w-4 text-success" />} tone={data.live.onlineNow ? "success" : "default"} hint={`${data.live.visitors24h} visitors in 24h →`} /></Link>
+          <StatCard label="New users (7 days)" value={data.live.newUsers7d} icon={<UserPlus className="h-4 w-4" />} hint={data.live.unverified ? `${data.live.unverified} unverified` : "all verified"} />
+          <StatCard label="Angel AI" value={data.angel?.questions7d ?? 0} icon={<Bot className="h-4 w-4" />} hint={`questions in 7 days · ${data.angel?.conversations ?? 0} chats`} />
+          <Link href="/admin/settings"><StatCard label="OTP email" value={data.email?.ready ? "Working" : "Not set up"} icon={<Mail className="h-4 w-4" />} tone={data.email?.ready ? "success" : "danger"} hint={data.email?.ready ? data.email.from : "Add Gmail App Password →"} /></Link>
+        </div>
+      )}
+      <MyFinances />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard label="Total users" value={u.total.toLocaleString("en-IN")} icon={<Users className="h-4 w-4" />} hint={`${u.admins} admin${u.admins === 1 ? "" : "s"}`} />
         <StatCard label="Active users" value={u.active.toLocaleString("en-IN")} icon={<UserCheck className="h-4 w-4" />} hint={`${u.activeLast30} signed in last 30d`} />

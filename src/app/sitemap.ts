@@ -1,11 +1,8 @@
 import type { MetadataRoute } from "next";
+import { PUBLIC_PAGES, SITE_URL } from "@/lib/seo";
+
+const UPDATED = new Date("2026-10-17");
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const base = process.env.APP_URL || "https://budget.dhrumilpanchal.in";
-  const now = new Date();
-  return [
-    { url: `${base}/`, lastModified: now, changeFrequency: "weekly", priority: 1 },
-    { url: `${base}/register`, lastModified: now, changeFrequency: "monthly", priority: 0.8 },
-    { url: `${base}/login`, lastModified: now, changeFrequency: "monthly", priority: 0.5 },
-  ];
+  return PUBLIC_PAGES.map((p) => ({ url: `${SITE_URL}${p.path === "/" ? "" : p.path}` || SITE_URL, lastModified: UPDATED, changeFrequency: p.freq, priority: p.priority }));
 }

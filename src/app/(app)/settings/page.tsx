@@ -10,8 +10,15 @@ import { Badge, Button, Card, CardHeader, ConfirmDialog, Field, Input, PageHeade
 import { api, ApiClientError, fmtDate, timeAgo } from "@/lib/client";
 import { deviceLoginSupported, enableDeviceLogin, forgetDevice, getRememberedDevice, rememberDevice } from "@/lib/device-login";
 import { THEMES } from "@/lib/themes";
+import { CURRENCIES } from "@/lib/currencies";
 
-const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED", "SGD", "AUD", "CAD"];
+const LANGUAGES = [
+  { v: "auto", l: "Auto — reply in the language I ask in" },
+  { v: "en", l: "English" },
+  { v: "hi", l: "हिंदी (Hindi)" },
+  { v: "gu", l: "ગુજરાતી (Gujarati)" },
+  { v: "hn", l: "Hinglish" },
+];
 
 function urlBase64ToUint8Array(base64: string) {
   const padding = "=".repeat((4 - (base64.length % 4)) % 4);
@@ -27,15 +34,16 @@ function ProfileCard() {
   const toast = useToast();
   const [name, setName] = useState(user.name);
   const [currency, setCurrency] = useState(user.currency);
+  const [language, setLanguage] = useState<string>(user.language || "auto");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const dirty = name.trim() !== user.name || currency !== user.currency;
+  const dirty = name.trim() !== user.name || currency !== user.currency || language !== (user.language || "auto");
 
   const save = async () => {
     setSaving(true);
     setErrors({});
     try {
-      const r = await api("/api/auth/me", { method: "PATCH", body: { name: name.trim(), currency } });
+      const r = await api("/api/auth/me", { method: "PATCH", body: { name: name.trim(), currency, language } });
       toast.success(r.message || "Profile updated successfully.");
       refresh();
     } catch (e) {
@@ -66,7 +74,18 @@ function ProfileCard() {
         <Field label="Currency" error={errors.currency}>
           <Select value={currency} onChange={(e) => setCurrency(e.target.value)} disabled={!can("settings.write")}>
             {CURRENCIES.map((c) => (
-              <option key={c}>{c}</option>
+              <option key={c.code} value={c.code}>
+                {c.code} — {c.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Angel AI language" hint="Auto = Angel replies in the language you ask in. Choosing a language makes every reply and every suggestion use it, on all your devices." className="sm:col-span-2">
+          <Select value={language} onChange={(e) => setLanguage(e.target.value)} disabled={!can("settings.write")}>
+            {LANGUAGES.map((x) => (
+              <option key={x.v} value={x.v}>
+                {x.l}
+              </option>
             ))}
           </Select>
         </Field>

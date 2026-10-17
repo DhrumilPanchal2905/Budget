@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import useSWR, { useSWRConfig } from "swr";
-import { Download, HandCoins, Pencil, PiggyBank, Plus, Search, Trash2, Repeat } from "lucide-react";
+import { Download, HandCoins, History, Pencil, PiggyBank, Plus, Search, Trash2, Repeat, ArrowDownLeft } from "lucide-react";
 import { api, ApiClientError, fmtDate, monthStr, qs, todayStr } from "@/lib/client";
 import { RESOURCES, type FieldDef, type ResourceKey } from "@/lib/finance-config";
 import { limitLabel, planForUser, usagePct } from "@/lib/plans";
@@ -46,6 +46,36 @@ const STATUS_TONE: Record<string, "success" | "warning" | "default" | "primary" 
   cancelled: "default",
 };
 
+interface GoalInsightView {
+  remaining: number;
+  monthsLeft: number;
+  requiredMonthly: number;
+  expectedProgress: number;
+  monthlyPace: number;
+  projectedDate: string | null;
+  status: "achieved" | "on_track" | "ahead" | "behind" | "overdue" | "not_started" | "paused" | "cancelled";
+}
+const GOAL_TONE: Record<GoalInsightView["status"], "success" | "warning" | "default" | "primary" | "danger"> = {
+  achieved: "success",
+  ahead: "success",
+  on_track: "primary",
+  behind: "warning",
+  overdue: "danger",
+  not_started: "default",
+  paused: "default",
+  cancelled: "default",
+};
+const GOAL_LABEL: Record<GoalInsightView["status"], string> = {
+  achieved: "Achieved",
+  ahead: "Ahead",
+  on_track: "On track",
+  behind: "Behind",
+  overdue: "Overdue",
+  not_started: "Not started",
+  paused: "Paused",
+  cancelled: "Cancelled",
+};
+
 function useDebounced<T>(value: T, ms = 300): T {
   const [v, setV] = useState(value);
   useEffect(() => {
@@ -58,9 +88,9 @@ function useDebounced<T>(value: T, ms = 300): T {
 function defaultsFor(resource: ResourceKey): Record<string, string> {
   switch (resource) {
     case "income":
-      return { title: "", type: "salary", category: "Salary", amount: "", date: todayStr(), recurring: "monthly", notes: "" };
+      return { title: "", type: "salary", category: "Salary", amount: "", date: todayStr(), recurring: "monthly", notes: "", autoRepeat: "false" };
     case "expense":
-      return { title: "", category: "Food & Dining", amount: "", date: todayStr(), recurring: "none", notes: "" };
+      return { title: "", category: "Food & Dining", amount: "", date: todayStr(), recurring: "none", notes: "", autoRepeat: "false" };
     case "debt":
       return { title: "", totalAmount: "", remainingAmount: "", emiAmount: "", interestRate: "", dueDate: todayStr(), status: "active", notes: "" };
     case "goal":
@@ -71,6 +101,7 @@ function defaultsFor(resource: ResourceKey): Record<string, string> {
 function toForm(resource: ResourceKey, row: Row): Record<string, string> {
   const out: Record<string, string> = {};
   for (const f of RESOURCES[resource].fields) out[f.name] = row[f.name] === null || row[f.name] === undefined ? "" : String(row[f.name]);
+  if (resource === "income" || resource === "expense") out.autoRepeat = row.autoRepeat ? "true" : "false";
   return out;
 }
 
@@ -128,6 +159,9 @@ export function FinanceManager({
   const [actionDate, setActionDate] = useState(todayStr());
   const [actionErr, setActionErr] = useState<Record<string, string>>({});
   const [actionBusy, setActionBusy] = useState(false);
+  const [withdraw, setWithdraw] = useState(false);
+  const [historyRow, setHistoryRow] = useState<Row | null>(null);
+  const { data: history, isLoading: historyLoading } = useSWR<{ items: { id: string; amount: number; date: string; note: string; source: string }[] }>(historyRow ? `${apiBase}/goal/${historyRow.id}/history` : null);
 
   const openCreate = () => {
     setEditing(null);
@@ -150,7 +184,7 @@ export function FinanceManager({
 
   const refreshAll = () => {
     void mutate();
-    void globalMutate((k) => typeof k === "string" && (k.startsWith("/api/dashboard") || k.startsWith("/api/analytics") || k.startsWith("/api/plan") || k.startsWith("/api/insights") || k.startsWith(`${apiBase}/`) || k.startsWith("/api/admin/users")));
+    void globalMutate((k) => typeof k === "string" && (k.startsWith("/api/dashboard") || k.startsWith("/api/analytics") || k.startsWith("/api/plan") || k.startsWith("/api/insights") || k.startsWith("/api/budgets") || k.startsWith(`${apiBase}/`) || k.startsWith("/api/admin/users")));
   };
 
   const submit = async () => {
@@ -164,12 +198,13 @@ export function FinanceManager({
     }
     setSaving(true);
     setErrors({});
-    const body: Record<string, string> = {};
+    const body: Record<string, unknown> = {};
     for (const f of def.fields) {
       const v = form[f.name] ?? "";
       if (f.type === "percent" && v === "") continue;
       body[f.name] = v;
     }
+    if (resource === "income" || resource === "expense") body.autoRepeat = form.autoRepeat === "true" && form.recurring !== "none";
     try {
       const res = editing
         ? await api(`${apiBase}/${resource}/${editing.id}`, { method: "PATCH", body })
@@ -201,7 +236,8 @@ export function FinanceManager({
     }
   };
 
-  const openAction = (row: Row) => {
+  const openAction = (row: Row, out = false) => {
+    setWithdraw(out);
     setActionRow(row);
     setActionAmount(resource === "debt" ? String(Math.min(row.emiAmount || 0, row.remainingAmount || 0) || "") : "");
     setActionDate(todayStr());
@@ -214,7 +250,7 @@ export function FinanceManager({
     setActionErr({});
     try {
       const path = resource === "debt" ? "pay" : "contribute";
-      const body = resource === "debt" ? { amount: actionAmount, date: actionDate } : { amount: actionAmount };
+      const body = resource === "debt" ? { amount: actionAmount, date: actionDate } : { amount: actionAmount, date: actionDate, withdraw };
       const res = await api(`${apiBase}/${resource}/${actionRow.id}/${path}`, { method: "POST", body });
       toast.success(res.message || "Done.");
       setActionRow(null);
@@ -272,6 +308,8 @@ export function FinanceManager({
               <Repeat className="h-3 w-3" /> {row.recurring}
             </Badge>
           )}
+          {row.autoRepeat && row.recurrenceNext && <Badge tone="success">Auto · next {fmtDate(row.recurrenceNext)}</Badge>}
+          {row.autoAdded && <Badge>auto-added</Badge>}
           <span className="text-xs text-muted">{fmtDate(row.date)}</span>
         </span>
       );
@@ -287,12 +325,22 @@ export function FinanceManager({
         </span>
       );
     }
+    const gi = row.insight as GoalInsightView | undefined;
     return (
-      <span className="flex flex-wrap items-center gap-1.5">
-        <Badge tone={STATUS_TONE[row.status]}>{row.status}</Badge>
-        <span className="text-xs text-muted">
-          Target {money(row.targetAmount)} by {fmtDate(row.targetDate)}
+      <span className="flex flex-col gap-1">
+        <span className="flex flex-wrap items-center gap-1.5">
+          {gi ? <Badge tone={GOAL_TONE[gi.status]}>{GOAL_LABEL[gi.status]}</Badge> : <Badge tone={STATUS_TONE[row.status]}>{row.status}</Badge>}
+          <span className="text-xs text-muted">
+            Target {money(row.targetAmount)} by {fmtDate(row.targetDate)}
+          </span>
         </span>
+        {gi && gi.status !== "achieved" && gi.status !== "cancelled" && (
+          <span className="text-[11px] text-muted">
+            Need <b className="tabular text-fg">{money(gi.requiredMonthly)}/mo</b>
+            {gi.monthlyPace > 0 ? ` · saving ${money(gi.monthlyPace)}/mo` : ""}
+            {gi.projectedDate ? ` · finish ≈ ${fmtDate(gi.projectedDate)}` : ""}
+          </span>
+        )}
       </span>
     );
   };
@@ -300,7 +348,12 @@ export function FinanceManager({
   const progressBar = (row: Row) =>
     resource === "debt" || resource === "goal" ? (
       <div className="mt-2 max-w-xs">
-        <Progress value={row.progress} tone={row.status === "achieved" || row.status === "closed" ? "success" : "primary"} />
+        <div className="relative">
+          <Progress value={row.progress} tone={row.status === "achieved" || row.status === "closed" ? "success" : resource === "goal" && (row.insight?.status === "behind" || row.insight?.status === "overdue") ? "warning" : "primary"} />
+          {resource === "goal" && row.insight && row.insight.status !== "achieved" && (
+            <span className="absolute -top-1 h-4 w-0.5 rounded bg-fg/60" style={{ left: `${Math.min(100, row.insight.expectedProgress)}%` }} title={`Where you should be today: ${row.insight.expectedProgress}%`} />
+          )}
+        </div>
         <p className="tabular mt-1 text-[11px] text-muted">
           {resource === "debt" ? `${money(row.paidAmount, true)} paid of ${money(row.totalAmount, true)}` : `${row.progress}% of ${money(row.targetAmount, true)}`}
         </p>
@@ -317,6 +370,16 @@ export function FinanceManager({
       {canUpdate && resource === "goal" && row.status !== "cancelled" && (
         <Button size="sm" variant="secondary" onClick={() => openAction(row)} title="Add contribution">
           <PiggyBank className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Add</span>
+        </Button>
+      )}
+      {canUpdate && resource === "goal" && row.currentAmount > 0 && row.status !== "cancelled" && (
+        <Button size="icon" variant="ghost" onClick={() => openAction(row, true)} aria-label="Withdraw from goal" title="Withdraw">
+          <ArrowDownLeft className="h-4 w-4" />
+        </Button>
+      )}
+      {resource === "goal" && (
+        <Button size="icon" variant="ghost" onClick={() => setHistoryRow(row)} aria-label="Goal history" title="History">
+          <History className="h-4 w-4" />
         </Button>
       )}
       {canUpdate && (
@@ -598,6 +661,15 @@ export function FinanceManager({
           noValidate
         >
           {def.fields.map(renderField)}
+          {(resource === "income" || resource === "expense") && form.recurring && form.recurring !== "none" && (
+            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-surface-2/50 p-3 text-sm sm:col-span-2">
+              <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[rgb(var(--primary))]" checked={form.autoRepeat === "true"} onChange={(e) => setForm((s) => ({ ...s, autoRepeat: e.target.checked ? "true" : "false" }))} />
+              <span>
+                <span className="font-medium">Auto-repeat ({form.recurring})</span>
+                <span className="block text-xs text-muted">Add this entry automatically every time it repeats — perfect for salary, rent, SIPs and bills. Only future dates are added; you get a notification each time.</span>
+              </span>
+            </label>
+          )}
           {errors.form && <p className="text-sm text-danger sm:col-span-2">{errors.form}</p>}
           <button type="submit" className="hidden" />
         </form>
@@ -607,7 +679,7 @@ export function FinanceManager({
       <Modal
         open={Boolean(actionRow)}
         onClose={() => !actionBusy && setActionRow(null)}
-        title={resource === "debt" ? "Record EMI payment" : "Add contribution"}
+        title={resource === "debt" ? "Record EMI payment" : withdraw ? "Withdraw from goal" : "Add contribution"}
         description={
           actionRow
             ? resource === "debt"
@@ -622,7 +694,7 @@ export function FinanceManager({
               Cancel
             </Button>
             <Button onClick={submitAction} loading={actionBusy}>
-              {resource === "debt" ? "Record payment" : "Add contribution"}
+              {resource === "debt" ? "Record payment" : withdraw ? "Withdraw" : "Add contribution"}
             </Button>
           </>
         }
@@ -637,13 +709,34 @@ export function FinanceManager({
           <Field label="Amount" error={actionErr.amount}>
             <Input inputMode="decimal" value={actionAmount} onChange={(e) => setActionAmount(e.target.value.replace(/[^\d.]/g, ""))} invalid={Boolean(actionErr.amount)} placeholder="0.00" />
           </Field>
-          {resource === "debt" && (
-            <Field label="Payment date" error={actionErr.date}>
-              <Input type="date" value={actionDate} onChange={(e) => setActionDate(e.target.value)} />
-            </Field>
-          )}
+          <Field label={resource === "debt" ? "Payment date" : "Date"} error={actionErr.date}>
+            <Input type="date" value={actionDate} onChange={(e) => setActionDate(e.target.value)} />
+          </Field>
           <button type="submit" className="hidden" />
         </form>
+      </Modal>
+
+      <Modal open={Boolean(historyRow)} onClose={() => setHistoryRow(null)} title={historyRow ? `“${historyRow.name}” history` : "History"} description="Every contribution and withdrawal with its date." size="md">
+        {historyLoading ? (
+          <Skeleton className="h-40" />
+        ) : !history?.items.length ? (
+          <p className="py-6 text-center text-sm text-muted">No contributions recorded yet.</p>
+        ) : (
+          <ul className="max-h-[50vh] divide-y divide-border overflow-y-auto">
+            {history.items.map((h) => (
+              <li key={h.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                <div className="min-w-0">
+                  <p className="font-medium">{fmtDate(h.date)}</p>
+                  <p className="truncate text-xs text-muted">{h.note || (h.source === "initial" ? "Starting amount" : h.source === "angel" ? "Angel AI" : h.source === "admin" ? "Admin" : "Contribution")}</p>
+                </div>
+                <span className={cn("tabular font-semibold", h.amount < 0 ? "text-danger" : "text-success")}>
+                  {h.amount < 0 ? "−" : "+"}
+                  {money(Math.abs(h.amount))}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </Modal>
 
       <ConfirmDialog

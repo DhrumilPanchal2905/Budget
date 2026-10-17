@@ -4,6 +4,7 @@ import type { NextResponse } from "next/server";
 import { Session, User, type UserDoc } from "./models";
 import { SECURE_COOKIES, SESSION_ABSOLUTE_DAYS, SESSION_COOKIE, SESSION_IDLE_DAYS, SHORT_SESSION_HOURS } from "./env";
 import { effectivePermissions, type Permission } from "./permissions";
+import { geoFromHeaders } from "./geo";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -46,11 +47,22 @@ export async function createSession(
   userId: string,
   ip: string,
   userAgent: string,
-  opts: { remember?: boolean; method?: "password" | "passkey" | "register" } = {},
+  opts: { remember?: boolean; method?: "password" | "passkey" | "register"; headers?: Headers } = {},
 ): Promise<string> {
   const remember = Boolean(opts.remember);
   const token = randomBytes(32).toString("base64url");
+  let geo: { country?: string; region?: string; city?: string } = {};
+  try {
+    geo = opts.headers ? geoFromHeaders(opts.headers) : {};
+    // location is a nice-to-have: it must never block a sign-in
+    if (geo.country) await User.updateOne({ _id: userId }, { $set: { lastLocation: { country: geo.country, region: geo.region, city: geo.city }, lastSeenAt: new Date() } });
+  } catch (e) {
+    console.error("[auth] location update skipped:", (e as Error)?.message);
+  }
   await Session.create({
+    country: geo.country,
+    region: geo.region,
+    city: geo.city,
     tokenHash: hashToken(token),
     userId,
     expiresAt: new Date(Date.now() + idleMs(remember)),
@@ -154,6 +166,8 @@ export function publicUser(user: UserDoc, perms: Permission[]) {
     status: user.status,
     currency: user.currency || "INR",
     theme: user.theme || "midnight",
+    language: user.replyLanguage || "auto",
+    emailVerified: user.emailVerified !== false,
     permissions: perms,
     createdAt: user.createdAt,
     lastLoginAt: user.lastLoginAt ?? null,

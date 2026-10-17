@@ -15,6 +15,8 @@ const PURGEABLE: Record<string, { label: string; dateField: string; note: string
   ratelimits: { label: "Rate-limit buckets", dateField: "expiresAt", note: "Temporary counters (auto-expire)." },
   sessions: { label: "Sessions", dateField: "createdAt", note: "Signs users out. Your current session is kept." },
   pushsubscriptions: { label: "Push subscriptions", dateField: "createdAt", note: "Users must re-enable push." },
+  visits: { label: "Website visits", dateField: "createdAt", note: "Visitor analytics (auto-expire after 180 days)." },
+  emailotps: { label: "Pending email codes", dateField: "expiresAt", note: "Unused sign-up / reset codes (auto-expire)." },
 };
 
 /** Database overview — counts only. Credentials/URIs are never sent to the browser. */

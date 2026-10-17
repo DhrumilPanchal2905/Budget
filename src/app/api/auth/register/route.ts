@@ -1,57 +1,41 @@
 import { NextResponse } from "next/server";
-import { route, parseBody, handleError } from "@/lib/api";
+import { createHash, randomBytes } from "crypto";
+import { route, parseBody } from "@/lib/api";
+import { SECURE_COOKIES } from "@/lib/env";
 import { registerSchema } from "@/lib/validation";
 import { rateLimit } from "@/lib/ratelimit";
 import { User } from "@/lib/models";
-import { createSession, hashPassword, publicUser, setSessionCookie } from "@/lib/auth";
-import { DEFAULT_ADMIN_PERMISSIONS, DEFAULT_USER_PERMISSIONS, effectivePermissions } from "@/lib/permissions";
-import { audit } from "@/lib/audit";
-import { notifyUser } from "@/lib/notify";
+import { hashPassword } from "@/lib/auth";
 import { Errors } from "@/lib/errors";
+import { issueOtp } from "@/lib/otp";
+import { mailError } from "@/lib/signup";
 
 export const runtime = "nodejs";
 
+const SIGNUP_COOKIE = "bp_signup";
+
+/**
+ * Step 1 of sign-up: validate, then email a 6-digit code. The account is created only after the code is
+ * verified (POST /api/auth/register/verify) — so every self-registered email address is real and owned.
+ * Accounts created by an admin skip this step.
+ */
 export const POST = route({ auth: false }, async ({ req, ip }) => {
+  await rateLimit(`register:ip:${ip}`, 10, 60 * 60);
+  const { name, email, password } = await parseBody(req, registerSchema);
+  await rateLimit(`register:email:${email}`, 6, 60 * 60);
+  if (await User.exists({ email })) throw Errors.conflict("An account with this email already exists.");
+  const passwordHash = await hashPassword(password);
+  // Binds this sign-up to THIS browser: only the browser holding the nonce cookie can finish it. Without it, someone
+  // else could re-submit the form for your email with their password and wait for you to enter your code.
+  const nonce = randomBytes(24).toString("base64url");
+  const nonceHash = createHash("sha256").update(nonce).digest("hex");
+  let resendIn = 60;
   try {
-    await rateLimit(`register:ip:${ip}`, 10, 60 * 60);
-    const { name, email, password } = await parseBody(req, registerSchema);
-
-    if (await User.exists({ email })) throw Errors.conflict("An account with this email already exists.");
-
-    const adminEmails = (process.env.ADMIN_EMAILS || "")
-      .split(",")
-      .map((e) => e.trim().toLowerCase())
-      .filter(Boolean);
-    const role = adminEmails.includes(email) ? "admin" : "user";
-
-    const user = await User.create({
-      name,
-      email,
-      passwordHash: await hashPassword(password),
-      role,
-      permissions: role === "admin" ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_USER_PERMISSIONS,
-      plan: role === "admin" ? "unlimited" : "free",
-      lastLoginAt: new Date(),
-    });
-
-    const token = await createSession(String(user._id), ip, req.headers.get("user-agent") || "", { remember: true, method: "register" });
-    await audit({ actor: user, action: "auth.register", resource: "user", resourceId: String(user._id), targetUserId: String(user._id), metadata: { role }, ip });
-    await notifyUser(String(user._id), {
-      type: "system",
-      title: "Welcome to Budget Pro 👋",
-      message: "Start by adding your salary and a few expenses — your dashboard and insights will update in realtime.",
-      link: "/income",
-      push: false,
-    });
-
-    const lean = user.toObject();
-    const res = NextResponse.json(
-      { success: true, message: "Account created successfully.", data: { user: publicUser(lean, effectivePermissions(lean.role, lean.permissions)) } },
-      { status: 201 },
-    );
-    setSessionCookie(res, token, true);
-    return res;
+    ({ resendIn } = await issueOtp(email, "signup", { name, payload: { name, passwordHash, nonceHash } }));
   } catch (err) {
-    return handleError(err);
+    mailError(err);
   }
+  const res = NextResponse.json({ success: true, message: `We sent a 6-digit code to ${email}.`, data: { otpRequired: true, email, resendIn } }, { headers: { "Cache-Control": "no-store" } });
+  res.cookies.set({ name: SIGNUP_COOKIE, value: nonce, httpOnly: true, secure: SECURE_COOKIES, sameSite: "strict", path: "/api/auth/register", maxAge: 60 * 60 });
+  return res;
 });

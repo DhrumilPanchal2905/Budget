@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ok, parseBody, type AuthCtx } from "./api";
 import { Errors } from "./errors";
 import { isResourceKey, RESOURCES, type ResourceKey } from "./finance-config";
-import { contributeGoal, createRecord, deleteRecord, listRecords, payDebt, requiredPerms, updateRecord } from "./finance";
+import { contributeGoal, createRecord, deleteRecord, goalHistory, listRecords, payDebt, requiredPerms, updateRecord } from "./finance";
 import { debtPaymentSchema, goalContributionSchema } from "./validation";
 import type { UserDoc } from "./models";
 import type { Permission } from "./permissions";
@@ -57,10 +57,16 @@ export async function handleAction(ctx: AuthCtx, owner: UserDoc, resource: Resou
     return ok({ record }, "EMI payment recorded successfully.");
   }
   if (resource === "goal" && action === "contribute") {
-    const { amount } = await parseBody(ctx.req, goalContributionSchema);
-    const record = await contributeGoal({ user: ctx.user, ip: ctx.ip }, owner, id, amount);
-    return ok({ record }, "Contribution added successfully.");
+    const { amount, date, note, withdraw } = await parseBody(ctx.req, goalContributionSchema);
+    const record = await contributeGoal({ user: ctx.user, ip: ctx.ip }, owner, id, amount, { withdraw, date, note });
+    return ok({ record }, withdraw ? "Withdrawal recorded." : "Contribution added successfully.");
   }
+  throw Errors.notFound("Action");
+}
+
+/** GET /…/goal/:id/history → the goal's ledger (contributions + withdrawals with dates). */
+export async function handleGetAction(ctx: AuthCtx, owner: UserDoc, resource: ResourceKey, id: string, action: string) {
+  if (resource === "goal" && action === "history") return ok({ items: await goalHistory(String(owner._id), id) });
   throw Errors.notFound("Action");
 }
 

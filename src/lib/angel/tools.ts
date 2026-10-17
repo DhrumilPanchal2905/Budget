@@ -303,3 +303,73 @@ export async function topEarners(start: Date, end: Date, limit = 5) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return rows.map((r: any) => ({ name: r.u?.[0]?.name ?? "deleted user", email: r.u?.[0]?.email ?? "", total: fromMinor(r.total) }));
 }
+
+// ---------------- reasoning helpers ----------------
+/** Biggest individual expenses in a window (optionally one category) — used to EXPLAIN changes. */
+export async function topTransactions(userId: string, start: Date, end: Date, category: string | null, limit = 3) {
+  const rows = await Expense.find({ userId: oid(userId), date: { $gte: start, $lt: end }, ...(category ? { category } : {}) })
+    .sort({ amount: -1 })
+    .limit(limit)
+    .lean();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return rows.map((d: any) => ({ id: String(d._id), title: d.title as string, category: d.category as string, amount: fromMinor(d.amount), date: new Date(d.date).toISOString().slice(0, 10) }));
+}
+
+/** Entries matching words / category / amount (newest first, last 120 days) — for "delete the swiggy expense". */
+export async function findEntries(userId: string, q: { words: string[]; category: string | null; amount: number | null; resource: "income" | "expense" | null }) {
+  const since = new Date(Date.now() - 120 * 86400000);
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const words = q.words.filter((w) => w.length >= 3).slice(0, 4);
+  const pick = async (kind: "income" | "expense") => {
+    const model = kind === "income" ? Income : Expense;
+    const or: Record<string, unknown>[] = [];
+    if (words.length) or.push(...words.map((w) => ({ title: { $regex: esc(w), $options: "i" } })));
+    if (q.category) or.push({ category: q.category });
+    const match: Record<string, unknown> = { userId: oid(userId), date: { $gte: since } };
+    if (or.length) match.$or = or;
+    if (q.amount) match.amount = Math.round(q.amount * 100);
+    if (!or.length && !q.amount) return [];
+    const rows = await model.find(match).sort({ date: -1, createdAt: -1 }).limit(8).lean();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return rows.map((d: any) => ({ id: String(d._id), resource: kind, title: d.title as string, category: d.category as string, amount: fromMinor(d.amount), date: new Date(d.date).toISOString().slice(0, 10) }));
+  };
+  const lists = q.resource ? [await pick(q.resource)] : await Promise.all([pick("expense"), pick("income")]);
+  return lists.flat().slice(0, 8);
+}
+
+/** Repeating payments: entries marked monthly/weekly/yearly, auto-repeat ones and Subscriptions (last ~2 months). */
+export async function recurringList(userId: string) {
+  const since = new Date(Date.now() - 70 * 86400000);
+  const rows = await Expense.aggregate([
+    { $match: { userId: oid(userId), $or: [{ autoRepeat: true }, { recurring: { $in: ["monthly", "weekly", "yearly"] }, date: { $gte: since } }, { category: "Subscriptions", date: { $gte: since } }] } },
+    { $sort: { date: -1 } },
+    { $group: { _id: { $toLower: "$title" }, title: { $first: "$title" }, category: { $first: "$category" }, amount: { $first: "$amount" }, recurring: { $first: "$recurring" }, auto: { $max: "$autoRepeat" }, last: { $first: "$date" } } },
+    { $sort: { amount: -1 } },
+    { $limit: 15 },
+  ]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return rows.map((r: any) => ({ title: r.title as string, category: r.category as string, amount: fromMinor(r.amount), recurring: (r.recurring as string) || "monthly", auto: Boolean(r.auto), last: new Date(r.last).toISOString().slice(0, 10) }));
+}
+
+/** Platform visitors (admin): online now, today, top places. */
+export async function visitorsSummary(start: Date) {
+  const { Visit } = await import("../models");
+  const fiveMin = new Date(Date.now() - 5 * 60 * 1000);
+  const [online, totals, places, lastOnes] = await Promise.all([
+    Visit.aggregate([{ $match: { createdAt: { $gte: fiveMin } } }, { $group: { _id: "$visitorId" } }, { $count: "n" }]),
+    Visit.aggregate([{ $match: { createdAt: { $gte: start } } }, { $group: { _id: null, views: { $sum: 1 }, v: { $addToSet: "$visitorId" }, u: { $addToSet: "$userId" } } }, { $project: { views: 1, visitors: { $size: "$v" }, users: { $size: { $setDifference: ["$u", [null]] } } } }]),
+    Visit.aggregate([{ $match: { createdAt: { $gte: start } } }, { $group: { _id: { city: "$city", country: "$country" }, n: { $addToSet: "$visitorId" } } }, { $project: { n: { $size: "$n" } } }, { $sort: { n: -1 } }, { $limit: 6 }]),
+    Visit.find({ createdAt: { $gte: start } }).sort({ createdAt: -1 }).limit(6).lean(),
+  ]);
+  const t = totals[0] ?? { views: 0, visitors: 0, users: 0 };
+  return {
+    online: online[0]?.n ?? 0,
+    views: t.views as number,
+    visitors: t.visitors as number,
+    signedIn: t.users as number,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    places: places.map((p: any) => ({ place: [p._id.city, p._id.country].filter(Boolean).join(", ") || "Unknown", n: p.n as number })),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    recent: lastOnes.map((v: any) => ({ path: v.path as string, place: [v.city, v.country].filter(Boolean).join(", ") || "Unknown", device: v.device as string, at: v.createdAt as Date })),
+  };
+}

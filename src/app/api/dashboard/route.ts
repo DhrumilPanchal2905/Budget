@@ -2,6 +2,7 @@ import { route, ok } from "@/lib/api";
 import { getDashboard } from "@/lib/analytics";
 import { generateInsights } from "@/lib/insights";
 import { planForUser } from "@/lib/plans";
+import { insightLang } from "@/lib/lang";
 
 export const runtime = "nodejs";
 
@@ -10,7 +11,7 @@ export const GET = route({ perms: ["finance.read"] }, async ({ user, perms }) =>
   const [dashboard, insights] = await Promise.all([
     getDashboard(String(user._id)),
     perms.includes("insights.view")
-      ? generateInsights(String(user._id), { advanced: plan.advancedInsights, currency: user.currency || "INR" })
+      ? generateInsights(String(user._id), { advanced: plan.advancedInsights, currency: user.currency || "INR", lang: insightLang(null, user.replyLanguage) })
       : Promise.resolve(null),
   ]);
   return ok({ ...dashboard, insights: insights ? insights.insights.slice(0, 4) : [] });

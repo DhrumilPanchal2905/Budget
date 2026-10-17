@@ -22,6 +22,7 @@ interface Dashboard {
     incomeChange: number | null;
     expenseChange: number | null;
     totalSavings: number;
+    freeBalance: number;
     goalSaved: number;
     goalTarget: number;
     totalDebt: number;
@@ -29,11 +30,11 @@ interface Dashboard {
     emiPaidThisMonth: number;
     activeDebts: number;
   };
-  health: { score: number | null; savingsRate: number | null; emiRatio: number | null; expenseRatio: number | null; goalProgress: number | null };
+  health: { score: number | null; savingsRate: number | null; emiRatio: number | null; expenseRatio: number | null; goalProgress: number | null; goalsOnTrack: number | null };
   trend: { label: string; income: number; expense: number; savings: number }[];
   expenseByCategory: { category: string; total: number; share: number }[];
   upcoming: { id: string; title: string; emi: number; dueDate: string; daysLeft: number }[];
-  goals: { id: string; name: string; status: string; target: number; current: number; progress: number; targetDate: string }[];
+  goals: { id: string; name: string; status: string; target: number; current: number; progress: number; targetDate: string; insight?: { status: string; requiredMonthly: number; expectedProgress: number; projectedDate: string | null } }[];
   recent: { id: string; kind: "income" | "expense"; title: string; category: string; amount: number; date: string }[];
   notifications: { unread: number; latest: { id: string; title: string; message: string; read: boolean; createdAt: string; link: string | null }[] };
   insights: InsightView[];
@@ -65,6 +66,52 @@ function Indicator({ label, value, good, suffix = "%" }: { label: string; value:
       <span className="text-muted">{label}</span>
       <span className={cn("tabular font-medium", good === null ? "" : good ? "text-success" : "text-warning")}>{value === null ? "—" : `${value}${suffix}`}</span>
     </div>
+  );
+}
+
+interface BudgetMini {
+  daysLeft: number;
+  items: { category: string; limit: number; spent: number; pct: number; status: "ok" | "warn" | "over" }[];
+  total: { category: string; limit: number; spent: number; pct: number; status: "ok" | "warn" | "over" } | null;
+}
+
+const GOAL_STATUS: Record<string, { label: string; tone: "success" | "primary" | "warning" | "danger" | "default" }> = {
+  achieved: { label: "Achieved", tone: "success" },
+  ahead: { label: "Ahead", tone: "success" },
+  on_track: { label: "On track", tone: "primary" },
+  behind: { label: "Behind", tone: "warning" },
+  overdue: { label: "Overdue", tone: "danger" },
+  not_started: { label: "Not started", tone: "default" },
+  paused: { label: "Paused", tone: "default" },
+};
+
+function BudgetsCard() {
+  const { money } = useSession();
+  const { data } = useSWR<BudgetMini>("/api/budgets");
+  const rows = data ? [...(data.total ? [{ ...data.total, category: "Whole month" }] : []), ...data.items].slice(0, 5) : [];
+  return (
+    <Card>
+      <CardHeader title="Budgets" subtitle={data ? `${data.daysLeft} days left this month` : undefined} action={<Link href="/budgets" className="text-xs font-medium text-primary hover:underline">Manage</Link>} />
+      <div className="space-y-3.5 px-5 pb-5 pt-4">
+        {!data ? (
+          <Skeleton className="h-24" />
+        ) : !rows.length ? (
+          <EmptyState icon={<Wallet className="h-5 w-5" />} title="No budgets yet" message="Set monthly limits — Angel suggests them from your spending." />
+        ) : (
+          rows.map((b) => (
+            <div key={b.category}>
+              <div className="mb-1 flex items-center justify-between gap-2 text-sm">
+                <span className="truncate font-medium">{b.category}</span>
+                <span className={cn("tabular text-xs", b.status === "over" ? "text-danger" : b.status === "warn" ? "text-warning" : "text-muted")}>
+                  {money(b.spent, true)} / {money(b.limit, true)}
+                </span>
+              </div>
+              <Progress value={Math.min(100, b.pct)} tone={b.status === "over" ? "danger" : b.status === "warn" ? "warning" : "success"} />
+            </div>
+          ))
+        )}
+      </div>
+    </Card>
   );
 }
 
@@ -136,8 +183,8 @@ function DashboardInner() {
         <StatCard label="Income this month" value={money(s.income)} icon={<TrendingUp className="h-4 w-4" />} change={s.incomeChange} hint="vs last month" />
         <StatCard label="Expenses this month" value={money(s.expense)} icon={<TrendingDown className="h-4 w-4" />} change={s.expenseChange} changeGoodWhenUp={false} hint="vs last month" />
         <StatCard label="Remaining balance" value={money(s.balance)} icon={<Wallet className="h-4 w-4" />} tone={s.balance < 0 ? "danger" : "default"} hint={s.income ? `${s.savingsRate}% savings rate` : "Add income to see rate"} />
-        <StatCard label="Total savings" value={money(s.totalSavings)} icon={<PiggyBank className="h-4 w-4" />} tone={s.totalSavings < 0 ? "danger" : "default"} hint="Lifetime income − expenses" />
-        <StatCard label="Goal savings" value={money(s.goalSaved)} icon={<Target className="h-4 w-4" />} hint={s.goalTarget ? `of ${money(s.goalTarget, true)} target` : "No goals yet"} />
+        <StatCard label="Total balance" value={money(s.totalSavings)} icon={<PiggyBank className="h-4 w-4" />} tone={s.totalSavings < 0 ? "danger" : "default"} hint={s.goalSaved ? `${money(s.freeBalance, true)} free · ${money(s.goalSaved, true)} in goals` : "Lifetime income − expenses"} />
+        <StatCard label="Goal savings" value={money(s.goalSaved)} icon={<Target className="h-4 w-4" />} hint={s.goalTarget ? `of ${money(s.goalTarget, true)} target${h.goalsOnTrack !== null ? ` · ${h.goalsOnTrack}% on track` : ""}` : "No goals yet"} />
         <StatCard label="Total debt" value={money(s.totalDebt)} icon={<Landmark className="h-4 w-4" />} hint={`${s.activeDebts} active loan${s.activeDebts === 1 ? "" : "s"}`} />
         <StatCard label="EMI obligations" value={money(s.emiMonthly)} icon={<CalendarClock className="h-4 w-4" />} hint={`${money(s.emiPaidThisMonth, true)} paid this month`} />
         <StatCard label="Health score" value={h.score === null ? "—" : `${h.score}/100`} icon={<HeartPulse className="h-4 w-4" />} tone={h.score === null ? "default" : h.score >= 70 ? "success" : h.score >= 45 ? "warning" : "danger"} hint="Savings, EMI load & goals" />
@@ -158,7 +205,7 @@ function DashboardInner() {
               <Indicator label="Savings rate" value={h.savingsRate} good={h.savingsRate === null ? null : h.savingsRate >= 20} />
               <Indicator label="EMI to income" value={h.emiRatio} good={h.emiRatio === null ? null : h.emiRatio <= 35} />
               <Indicator label="Expense ratio" value={h.expenseRatio} good={h.expenseRatio === null ? null : h.expenseRatio <= 80} />
-              <Indicator label="Goal progress" value={h.goalProgress} good={h.goalProgress === null ? null : h.goalProgress >= 50} />
+              {h.goalsOnTrack !== null ? <Indicator label="Goals on track" value={h.goalsOnTrack} good={h.goalsOnTrack >= 75} /> : <Indicator label="Goal progress" value={h.goalProgress} good={h.goalProgress === null ? null : h.goalProgress >= 50} />}
             </div>
           </div>
         </Card>
@@ -181,11 +228,12 @@ function DashboardInner() {
                 <div key={g.id}>
                   <div className="mb-1.5 flex items-center justify-between gap-2 text-sm">
                     <span className="truncate font-medium">{g.name}</span>
-                    {g.status === "achieved" ? <Badge tone="success">Achieved</Badge> : <span className="tabular text-xs text-muted">{g.progress}%</span>}
+                    {g.insight && GOAL_STATUS[g.insight.status] ? <Badge tone={GOAL_STATUS[g.insight.status].tone}>{GOAL_STATUS[g.insight.status].label}</Badge> : <span className="tabular text-xs text-muted">{g.progress}%</span>}
                   </div>
-                  <Progress value={g.progress} tone={g.status === "achieved" ? "success" : "primary"} />
+                  <Progress value={g.progress} tone={g.status === "achieved" ? "success" : g.insight?.status === "behind" || g.insight?.status === "overdue" ? "warning" : "primary"} />
                   <p className="tabular mt-1 text-xs text-muted">
-                    {money(g.current, true)} of {money(g.target, true)} · by {fmtDate(g.targetDate)}
+                    {money(g.current, true)} of {money(g.target, true)} ({g.progress}%) · by {fmtDate(g.targetDate)}
+                    {g.insight && g.status !== "achieved" && g.insight.requiredMonthly > 0 ? ` · need ${money(g.insight.requiredMonthly, true)}/mo` : ""}
                   </p>
                 </div>
               ))
@@ -249,9 +297,10 @@ function DashboardInner() {
           </div>
         </Card>
         <div className="space-y-4 lg:col-span-2">
+          {can("expense.view") && <BudgetsCard />}
           {can("insights.view") && (
             <Card>
-              <CardHeader title="Insights" action={<Link href="/insights" className="text-xs font-medium text-primary hover:underline">See all</Link>} />
+              <CardHeader title="Angel AI suggestions" action={<Link href="/insights" className="text-xs font-medium text-primary hover:underline">See all</Link>} />
               <div className="divide-y divide-border px-5 pb-2 pt-1">
                 {data.insights.length ? data.insights.map((i) => <InsightRow key={i.id} insight={i} compact />) : <p className="py-6 text-center text-sm text-muted">No insights yet.</p>}
               </div>

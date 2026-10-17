@@ -11,7 +11,7 @@ import { RealtimeEvent } from "./models";
  *
  * Channels:  user:<userId>  |  admin  |  all
  */
-export type RealtimeEventName = "finance:changed" | "notification:new" | "admin:activity" | "session:revoked" | "profile:changed";
+export type RealtimeEventName = "finance:changed" | "notification:new" | "admin:activity" | "session:revoked" | "profile:changed" | "visitor:new";
 
 let pusher: Pusher | null | undefined;
 

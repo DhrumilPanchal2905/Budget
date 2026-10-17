@@ -28,6 +28,9 @@ import {
   Users,
   X,
   MoreHorizontal,
+  Wallet,
+  Globe,
+  SlidersHorizontal,
 } from "lucide-react";
 import { api, timeAgo } from "@/lib/client";
 import { THEMES } from "@/lib/themes";
@@ -50,10 +53,11 @@ const MAIN_NAV: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, perm: "finance.read" },
   { href: "/income", label: "Income", icon: TrendingUp, perm: "income.view" },
   { href: "/expenses", label: "Expenses", icon: TrendingDown, perm: "expense.view" },
+  { href: "/budgets", label: "Budgets", icon: Wallet, perm: "expense.view" },
   { href: "/debts", label: "Debts & EMIs", icon: Landmark, perm: "debt.view" },
   { href: "/goals", label: "Savings goals", icon: Target, perm: "goal.view" },
   { href: "/analytics", label: "Analytics", icon: BarChart3, perm: "reports.view" },
-  { href: "/insights", label: "Insights", icon: Lightbulb, perm: "insights.view" },
+  { href: "/insights", label: "Angel suggestions", icon: Lightbulb, perm: "insights.view" },
   { href: "/notifications", label: "Notifications", icon: Bell, perm: "notifications.read" },
 ];
 const ACCOUNT_NAV: NavItem[] = [
@@ -63,9 +67,11 @@ const ACCOUNT_NAV: NavItem[] = [
 const ADMIN_NAV: NavItem[] = [
   { href: "/admin", label: "Admin overview", icon: Gauge, perm: "users.view" },
   { href: "/admin/users", label: "Users", icon: Users, perm: "users.view" },
+  { href: "/admin/visitors", label: "Visitors (live)", icon: Globe, perm: "users.view" },
   { href: "/admin/database", label: "Database", icon: Database, perm: "database.view" },
   { href: "/admin/audit", label: "Audit log", icon: ScrollText, perm: "audit.view" },
   { href: "/admin/notifications", label: "Broadcast", icon: Megaphone, perm: "admin.notifications.send" },
+  { href: "/admin/settings", label: "System settings", icon: SlidersHorizontal, perm: "database.view" },
 ];
 
 function Logo() {

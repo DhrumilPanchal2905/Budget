@@ -33,6 +33,13 @@ interface Detail {
   plan: { name: string; maxFinanceRecords: number | null; maxGoals: number | null; unlimited: boolean };
   usage: { incomes: number; expenses: number; debts: number; goals: number; financeRecords: number };
   activeSessions: number;
+  whereabouts?: {
+    lastSeenAt: string | null;
+    lastLocation: string | null;
+    emailVerified: boolean;
+    sessions: { id: string; createdAt: string; lastSeenAt: string; method: string; place: string; device: string }[];
+    visits: { id: string; at: string; path: string; place: string; code: string | null; device: string }[];
+  };
   totals: { income: number; expense: number; savings: number; debtRemaining: number; goalSaved: number; emiMonthly: number } | null;
   monthly: { label: string; income: number; expense: number }[];
   notifications: { id: string; type: string; title: string; message: string; read: boolean; createdAt: string }[];
@@ -314,6 +321,9 @@ function Inner() {
         <Badge tone={u.role === "admin" ? "warning" : "default"}>{u.role}</Badge>
         <Badge tone={u.status === "active" ? "success" : "danger"}>{u.status}</Badge>
         <Badge>{data.activeSessions} active session{data.activeSessions === 1 ? "" : "s"}</Badge>
+        {data.whereabouts && <Badge tone={data.whereabouts.emailVerified ? "success" : "warning"}>{data.whereabouts.emailVerified ? "email verified" : "email not verified"}</Badge>}
+        {data.whereabouts?.lastLocation && <Badge>📍 {data.whereabouts.lastLocation}</Badge>}
+        {data.whereabouts?.lastSeenAt && <Badge>seen {timeAgo(data.whereabouts.lastSeenAt)}</Badge>}
       </div>
 
       <Tabs
@@ -351,6 +361,38 @@ function Inner() {
                 <IncomeExpenseBars data={data.monthly} height={260} />
               </div>
             </Card>
+          )}
+          {data.whereabouts && (data.whereabouts.sessions.length > 0 || data.whereabouts.visits.length > 0) && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card>
+                <CardHeader title="Signed-in devices" subtitle="Approximate location from IP at sign-in" />
+                <ul className="divide-y divide-border px-5 pb-3">
+                  {data.whereabouts.sessions.map((x) => (
+                    <li key={x.id} className="py-2.5 text-sm">
+                      <p className="font-medium">📍 {x.place}</p>
+                      <p className="truncate text-xs text-muted">{x.method} · signed in {timeAgo(x.createdAt)} · active {timeAgo(x.lastSeenAt)}</p>
+                      <p className="truncate text-[11px] text-muted">{x.device}</p>
+                    </li>
+                  ))}
+                  {!data.whereabouts.sessions.length && <p className="py-6 text-center text-sm text-muted">No active sessions.</p>}
+                </ul>
+              </Card>
+              <Card>
+                <CardHeader title="Recent visits" />
+                <ul className="divide-y divide-border px-5 pb-3">
+                  {data.whereabouts.visits.map((v) => (
+                    <li key={v.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                      <div className="min-w-0">
+                        <p className="truncate font-mono text-xs">{v.path}</p>
+                        <p className="truncate text-xs text-muted">📍 {v.place} · {v.device}</p>
+                      </div>
+                      <span className="shrink-0 text-[11px] text-muted">{timeAgo(v.at)}</span>
+                    </li>
+                  ))}
+                  {!data.whereabouts.visits.length && <p className="py-6 text-center text-sm text-muted">No tracked visits yet.</p>}
+                </ul>
+              </Card>
+            </div>
           )}
           <EditUser d={data} onSaved={() => mutate()} />
           <PermissionsEditor d={data} onSaved={() => mutate()} />

@@ -6,7 +6,7 @@ import { NextResponse, type NextRequest } from "next/server";
 const SECURE = (process.env.APP_URL || "").startsWith("https://") || process.env.VERCEL === "1";
 const SESSION_COOKIE = SECURE ? "__Host-bp_session" : "bp_session";
 
-const APP_PREFIXES = ["/dashboard", "/income", "/expenses", "/debts", "/goals", "/analytics", "/insights", "/notifications", "/settings", "/plan", "/admin"];
+const APP_PREFIXES = ["/dashboard", "/income", "/expenses", "/debts", "/goals", "/budgets", "/analytics", "/insights", "/notifications", "/settings", "/plan", "/admin"];
 const MUTATING = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 function allowedOrigins(req: NextRequest): Set<string> {
@@ -61,5 +61,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|sw.js|robots.txt|sitemap.xml|manifest.webmanifest).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|icon.svg|sw.js|robots.txt|sitemap.xml|manifest.webmanifest|llms.txt|llms-full.txt|opengraph-image|apple-icon|icon-512).*)"],
 };

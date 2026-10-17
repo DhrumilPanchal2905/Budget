@@ -36,11 +36,16 @@ const securityHeaders = [
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  serverExternalPackages: ["mongoose", "@node-rs/argon2", "web-push"],
+  serverExternalPackages: ["mongoose", "@node-rs/argon2", "web-push", "nodemailer"],
   eslint: { ignoreDuringBuilds: true },
+  compress: true,
+  // Speed: only ship the icons / chart parts a page actually uses.
+  experimental: { optimizePackageImports: ["lucide-react", "recharts"] },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },
+      // public SEO assets can be cached by browsers / CDN
+      { source: "/icon.svg", headers: [{ key: "Cache-Control", value: "public, max-age=604800" }] },
       {
         source: "/sw.js",
         headers: [

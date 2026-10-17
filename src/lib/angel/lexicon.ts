@@ -28,6 +28,7 @@ export const LEX = {
 
   // ---------------- topics ----------------
   balance: [
+    "net worth", "=networth", "have left", "=left", "in my wallet", "=wallet", "pada hai", "pade hai", "pada he", "reh gaye", "=jama", "नेट वर्थ", "બાકી રહ્યા",
     "balance", "=bal", "money left", "money do i have", "how much money", "=funds", "=cash", "net balance", "current balance",
     "belens", "balans", "kitne paise", "kitna paisa", "paise kitne", "paisa kitna", "=bacha", "=bache", "=bachi", "mere pas", "kitna pada", "kitne pade",
     "ketla paisa", "ketla rupiya", "=bachya", "=bachyu", "=baki", "mari pase",
@@ -35,24 +36,31 @@ export const LEX = {
     "બેલેન્સ", "બેલન્સ", "બૅલેન્સ", "કેટલા પૈસા", "બચ્યા", "બચ્યું", "બાકી", "મારી પાસે",
   ],
   expense: [
+    "went out", "money out", "=outgoing", "=nikla", "=nikle", "=nikal gaya",
+    "=udaya", "=udaye", "=udd", "=uda", "=udaa", "=udaai", "=lutaya", "=vaparyu", "=vapraya", "उड़ाया", "उड़ा", "ઉડાવ્યા",
     "expense", "expens", "spend", "spent", "spending", "=paid", "=expenditure", "=outflow", "=cost", "=costs",
     "kharcha", "kharch", "kharche", "kharchi", "kharach", "kharchyu", "kharchya", "vaparya", "lagaya", "lagaye",
     "खर्च", "खर्चा", "खर्चे", "खरच", "व्यय", "लगाया", "लगाए",
     "ખર્ચ", "ખર્ચો", "ખર્ચા", "ખરચ", "ખર્ચ્યા", "ખર્ચ્યો", "ખર્ચ્યું", "વાપર્યા",
   ],
   income: [
+    "=kamata", "=kamati", "=kamate", "=kamaata",
     "income", "earn", "earned", "earning", "salary", "=inflow", "=revenue",
     "kamai", "kamaya", "kamaye", "amdani", "aamdani", "=aay", "=aamad", "pagar", "pagaar", "aavak", "avak", "kamani", "vetan", "tankhwah", "tankha",
     "आमदनी", "=आय", "कमाई", "कमाया", "कमाए", "सैलरी", "वेतन", "तनख्वाह", "तनखा", "इनकम",
     "આવક", "કમાણી", "કમાયા", "કમાવ્યા", "પગાર", "સેલરી", "ઇન્કમ", "ઈન્કમ",
   ],
   savings: [
+    "bacha liya", "bacha li", "save kar liya", "save kar li", "bachavi lidha", "બચાવી લીધા",
+    "bacha paya", "bacha payi", "bacha pai", "bacha saka", "bacha saki", "save kar paya", "save kiya", "save kari", "bachat hui", "बचा पाया", "बचत हुई", "બચાવી શક્યા",
     "saving", "savings", "=save", "=saved", "=saves",
     "bachat", "bachaya", "bachaye", "=bachana", "=bachani", "=bachau", "=bachaun", "=bachao", "bachav", "bachavu", "bachavva", "bachavi",
     "बचत", "बचाया", "बचाए", "बचाना", "बचानी", "बचाऊं", "बचाऊँ", "बचाओ", "सेविंग",
     "બચત", "બચાવ", "બચાવ્યા", "બચાવવા", "બચાવવું", "બચાવું", "સેવિંગ",
   ],
   advice: [
+    "=tarike", "=tarika", "=tarkib", "ways to", "how to reduce", "kam karne", "=rasta", "=rasto", "तरीके", "રસ્તો",
+    "kitne mahine", "kitna time", "how long", "how many months", "ketla mahina", "kab tak ho", "कितने महीने", "કેટલા મહિના", "=lagenge", "=lagega",
     "how can", "how do", "how should", "=suggest", "suggestion", "=advice", "=advise", "=tips", "=tip", "=plan", "planning", "=strategy", "should i", "help me", "=reduce", "=improve", "=guide",
     "kaise", "kya karu", "kya karun", "kya karna", "kya kru", "salah", "sujhav", "upay", "kam karu", "kam karna", "kya kare",
     "kevi rite", "shu karu", "shu karvu", "shu karvanu", "ochhu",
@@ -60,12 +68,15 @@ export const LEX = {
     "કેવી રીતે", "શું કરું", "શું કરવું", "શું કરવાનું", "સલાહ", "સૂચન", "ટિપ્સ", "પ્લાન", "ઉપાય", "ઓછો", "ઓછું",
   ],
   afford: [
+    "can i spend", "should i spend", "kharch kar sakta", "kharch karu kya", "lena theek", "lena thik", "le lena chahiye",
+    "le lu", "lelu", "=lu", "lu kya", "le lun", "le lu kya", "lai lau", "લઈ લઉં", "ले लूं",
     "afford", "can i buy", "should i buy", "=buy", "=purchase",
     "le sakta", "le sakti", "le sakte", "kharid sakta", "kharid sakti", "kharidu", "khareedu", "kharidna", "lena hai", "lai saku", "kharidi saku", "levu che", "levo che", "levi che",
     "ले सकता", "ले सकती", "ले सकते", "खरीद सकता", "खरीद सकती", "खरीदूं", "खरीदना", "लेना है",
     "લઈ શકું", "લઇ શકું", "ખરીદી શકું", "ખરીદવું", "લેવું છે", "લેવો છે", "લેવી છે",
   ],
   compare: [
+    "ya kam", "ya zyada", "ya jyada", "more or less", "pichle se", "last se", "gaye mahine se", "ke mukable", "than september", "than before", "pehle se",
     "compare", "comparison", "=vs", "versus", "than last", "difference", "=increased", "=decreased",
     "tulna", "mukable", "mukabale", "=fark", "=farak", "=antar", "sarkhamni",
     "तुलना", "मुकाबले", "मुक़ाबले", "फर्क", "फ़र्क", "अंतर",
@@ -79,6 +90,8 @@ export const LEX = {
     "સૌથી વધુ", "સૌથી વધારે", "ક્યાં ગયા", "ક્યાં ગયું", "કઈ વસ્તુ",
   ],
   largest: [
+    "=costly", "sabse costly", "=mehngi", "=mehnga",
+    "sabse mehnga", "sabse mehenga", "sabse mahnga", "most expensive", "sauthi mongho", "sauthi monghu", "सबसे महंगा", "સૌથી મોંઘો", "સૌથી મોંઘું",
     "biggest", "largest", "=costliest", "single biggest",
     "sabse bada", "sabse badi", "sabse bade", "sauthi moto", "sauthi motu", "sauthi moti",
     "सबसे बड़ा", "सबसे बडा", "सबसे बड़ी", "सबसे बडी",
@@ -97,12 +110,15 @@ export const LEX = {
     "ધ્યેય", "લક્ષ્ય", "ગોલ", "ટાર્ગેટ", "લક્ષ",
   ],
   recent: [
+    "did i log", "did i add", "did i enter", "maine kya add", "kya kya add", "kya likha", "what did i spend on yesterday",
     "recent", "latest", "last transactions", "last entries", "=transactions", "=transaction", "=entries", "last few",
     "aakhri", "akhri", "haal hi", "pichli entry", "pichli entries", "chhella", "chhelli", "chhelle", "taja", "lenden", "vyavahar",
     "आखिरी", "हाल ही", "ताज़ा", "ताजा", "लेनदेन", "ट्रांजैक्शन", "एंट्री",
     "છેલ્લા", "છેલ્લી", "છેલ્લો", "તાજેતર", "વ્યવહાર", "ટ્રાન્ઝેક્શન", "એન્ટ્રી",
   ],
   health: [
+    "rate my", "kaisa kar raha", "kaisa kar rahi", "kevu kari rahyo", "=financially", "mamle me",
+    "doing good", "doing well", "good with money", "financial condition", "=haalat",
     "=health", "=score", "financial health", "=condition", "=status",
     "=halat", "=haalat", "=sthiti", "=stithi", "kaisi hai halat", "=paristhiti",
     "स्वास्थ्य", "स्थिति", "हालत", "स्कोर", "हेल्थ",
@@ -128,12 +144,14 @@ export const LEX = {
   ],
   ack: ["=achha", "=acha", "=accha", "=hmm", "=hm", "=nice", "=great", "=cool", "=badhiya", "=badiya", "=saras", "=mast", "=sahi", "theek hai", "thik hai", "=okk", "अच्छा", "बढ़िया", "सही", "સરસ", "મસ્ત", "બરાબર છે"],
   adminWord: ["=admin", "=admins", "=administrator", "एडमिन", "એડમિન"],
-  whoWord: ["=who", "=whom", "=kisne", "કોણ", "=kon", "kis user", "kaun sa user", "kaunsa user", "which user", "=kone", "kya user", "किसने", "किस यूज़र", "कौन", "કોણે", "કયા યુઝર"],
+  whoWord: [
+    "=kaun", "=who","=who", "=whom", "=kisne", "કોણ", "=kon", "kis user", "kaun sa user", "kaunsa user", "which user", "=kone", "kya user", "किसने", "किस यूज़र", "कौन", "કોણે", "કયા યુઝર"],
   userFilter: [
     "=active", "=inactive", "=disabled", "=blocked", "=new", "=naye", "=naya", "=latest", "=newest", "=old", "=oldest", "=purana", "=purane", "=sabse purana", "=logged", "=login", "=signup", "joined",
     "नए", "पुराने", "पुराना", "एक्टिव", "बंद", "નવા", "જૂના", "એક્ટિવ",
   ],
   forecast: [
+    "end of the month", "month end", "by the end", "mahina khatam", "mahine ke last", "मंथ एंड",
     "forecast", "predict", "projection", "end of month", "month end", "will i save", "will be left",
     "mahine ke end", "mahine ke aakhir", "mahine ke ant", "mahina khatam", "bachega", "bachegi", "bachenge", "mahina na ante", "mahinana ante", "bachse",
     "अनुमान", "महीने के अंत", "महीने के आखिर", "महीने के एंड", "बचेगा", "बचेगी", "बचेंगे",
@@ -165,6 +183,7 @@ export const LEX = {
 
   // ---------------- actions ----------------
   addVerb: [
+    "jama karo", "jama kar do", "jama kar", "jama kari do",
     "=add", "=added", "add karo", "add kar", "=record", "=log", "=enter", "=note", "=entry", "=put",
     "dalo", "daalo", "dal do", "daal do", "dal de", "likho", "likh do", "likh de", "jodo", "jod do", "jod de", "darj",
     "umero", "umeri", "nakho", "nakhi", "lakho", "lakhi", "nondh", "nondho",
@@ -172,6 +191,7 @@ export const LEX = {
     "ઉમેરો", "ઉમેરી", "નાખો", "નાખી", "લખો", "લખી", "એડ", "ઍડ", "નોંધો", "નોંધ", "ઉમેર",
   ],
   spentPast: [
+    "=karvaya", "=karwaya", "=karaya", "=dalwaya", "=dalvaya", "=bharwaya", "=bharvaya", "=khareeda", "=kharidi", "=kiya", "=karavyu", "=karavyo", "करवाया", "डलवाया", "કરાવ્યું",
     "=spent", "=paid", "=bought", "=gave",
     "kharch kiye", "kharch kiya", "kharcha kiya", "kharch kar diye", "kharch ho gaye", "kharch hue", "=diye", "=diya", "=bhara", "=bhare", "=lagaye", "=lage", "=gaye", "=kharide", "=kharida", "=liya",
     "kharchya", "kharchyo", "kharch karya", "chukavya", "=apya", "=bharya", "vaparya", "=lidhu", "=lidha", "kharidyu", "kharidya",
@@ -197,6 +217,7 @@ export const LEX = {
   ],
   takeLoan: ["=took", "taken", "=liya", "=lidhi", "=lidhu", "=lidho", "लिया", "લીધી", "લીધું", "લીધો"],
   deleteVerb: [
+    "uda do", "=udado", "hata dena", "=delete kar",
     "=delete", "=remove", "=erase", "=hatao", "hata do", "=mitao", "mita do", "=kadho", "=kadhi", "=hatavo", "=kadhi nakho",
     "हटाओ", "हटा दो", "मिटाओ", "मिटा दो", "डिलीट", "रद्द",
     "કાઢો", "કાઢી", "હટાવો", "ડિલીટ", "રદ",
@@ -218,6 +239,35 @@ export const LEX = {
     "બંધ કરો", "બંધ કર", "આવજો", "ચૂપ",
   ],
 
+  // ---------------- new: budgets, reasoning, knowledge, admin ----------------
+  budgetWord: ["=budget", "=budgets", "=limit", "=limits", "=cap", "बजट", "लिमिट", "બજેટ", "લિમિટ", "=bajat"],
+  budgetCue: [
+    "=left", "=remaining", "=remain", "=bacha", "=bachi", "=bache", "=baki", "=baaki", "=over", "=cross", "=crossed", "=exceed", "=exceeded", "=status", "=khatam", "=paar", "=par", "=kitna", "=kitni", "=ketlu", "=ketlo", "how much", "=used", "=spent", "can i still", "aur kitna",
+    "बचा", "बाकी", "पार", "खत्म", "कितना", "બાકી", "બચ્યું", "પાર", "પૂરું", "કેટલું",
+  ],
+  setCue: ["=set", "=rakh", "=rakho", "rakh do", "=rakhna", "=rakhi", "=rakhvu", "=rakhjo", "=fix", "=make", "रखो", "रख दो", "सेट", "રાખો", "રાખી", "સેટ"],
+  why: [
+    "kaise ho gaya", "kaise hua", "how did", "kem thai gayu", "kem thayu", "कैसे हो गया",
+    "what made", "what caused", "how come", "kis wajah", "kis karan", "shena lidhe","=why", "=kyu", "=kyun", "=kyon", "=kyo", "=kaaran", "=karan", "=wajah", "=vajah", "=reason", "=caused", "क्यों", "क्यूं", "क्यो", "वजह", "कारण", "કેમ", "કારણ", "=kem"],
+  changeWord: ["=badha", "=badhi", "=badh", "badh gaya", "=increase", "=increased", "=more", "=higher", "=up", "=jump", "=vadhi", "=vadhyo", "=vadhyu", "=vadhu", "=vadhare", "=kam", "=less", "=lower", "=ghat", "=ghata", "=ochhu", "=ochho", "=zyada", "=jyada", "=itna", "=aatlo", "=so much", "बढ़ा", "बढ़ी", "बढ", "ज्यादा", "ज़्यादा", "कम", "घटा", "इतना", "વધ્યો", "વધી", "વધ્યું", "વધારે", "ઓછું", "ઓછો", "આટલો"],
+  visitorWord: ["visitor", "visitors", "=traffic", "=visits", "=visited", "=visit", "site pe", "site par", "=website", "=online", "=location", "=locations", "kis city", "which city", "=country", "विज़िटर", "विजिटर", "वेबसाइट", "ऑनलाइन", "લોકેશન", "વિઝિટર", "વેબસાઇટ", "ઓનલાઇન"],
+  blockWord: ["=block", "=disable", "=suspend", "=deactivate", "=ban", "account band", "ब्लॉक", "બ્લોક", "ડિસેબલ"],
+  unblockWord: ["=unblock", "=enable", "=activate", "=reactivate", "=unban", "chalu karo", "chalu kar", "अनब्लॉक", "चालू करो", "અનબ્લોક", "ચાલુ કરો"],
+  passwordWord: ["=password", "=passwd", "पासवर्ड", "પાસવર્ડ"],
+  resetWord: ["=reset", "=new", "=naya", "=change", "=forgot", "=bhool", "=bhul", "=badlo", "रीसेट", "नया", "भूल", "રીસેટ", "નવો", "ભૂલી"],
+  withdrawWord: ["=withdraw", "=withdrew", "take out", "=nikalo", "=nikal", "nikal do", "=nikalna", "=nikala", "=upad", "=upado", "निकालो", "निकाल", "ઉપાડો", "ઉપાડ્યા", "use money"],
+  lastWord: [
+    "abhi wali", "abhi wala", "abhi vali", "just now", "abhi ki", "abhi ka","=last", "=latest", "=pichli", "=pichla", "=pichhli", "=aakhri", "=akhri", "=chhelli", "=chhello", "=chhellu", "=previous", "आखिरी", "पिछली", "पिछला", "છેલ્લી", "છેલ્લો", "છેલ્લું"],
+  editVerb: ["=change", "=update", "=correct", "=edit", "=fix", "=badlo", "badal do", "kar do", "=kardo", "=karo", "=karvo", "kari do", "=sudharo", "बदलो", "कर दो", "सुधारो", "બદલો", "કરી દો", "સુધારો"],
+  needsWants: ["=needs", "=wants", "needs wants", "=zaroorat", "=zarurat", "=jarurat", "=shauk", "=shok", "=faltu", "=zaruri", "=jaruri", "ज़रूरत", "जरूरत", "शौक", "फालतू", "જરૂરિયાત", "શોખ"],
+  emergencyWord: ["emergency fund", "=emergency", "=aapatkal", "इमरजेंसी", "आपातकालीन", "ઇમરજન્સી", "ઈમરજન્સી", "naukri chali", "job loss", "lose my job"],
+  recurringWord: [
+    "=automatic", "auto debit", "=autopay", "har mahine kya kya", "har mahine automatic","=recurring", "=subscriptions", "fixed expenses", "fixed kharch", "fixed kharche", "fixed kharcha", "har mahine kya", "=repeat", "=repeating", "=fixed", "kya kya katta", "फिक्स खर्च", "ફિક્સ ખર્ચ", "દર મહિને શું"],
+  suggestionWord: [
+    "kya improve", "what should i improve", "kya sudharna", "kya sudharu", "shu sudharu", "क्या सुधारूं", "શું સુધારું","=suggestion", "=suggestions", "=suggest", "=sujhav", "=suchan", "=salah", "सुझाव", "સૂચન", "=recommend", "=recommendation"],
+  knowWord: [
+    "kya better", "which is better", "better hai", "kaunsa better", "kaun sa better", "su saru", "शु सारू", "कौन सा बेहतर", "કયું સારું",
+    "kaise karte", "kaise kare", "kaise karein", "how to", "how does", "how do i start", "kaise hota", "kevi rite thay", "=tarike", "कैसे करते","what is", "what are", "kya hai", "kya hota", "kya hoti", "kya hote", "shu che", "shu chhe", "=meaning", "=explain", "samjhao", "kya matlab", "क्या है", "क्या होता", "શું છે", "સમજાવો", "matlab"],
   // ---------------- admin ----------------
   users: [
     "=user", "=users", "=member", "=members", "=customer", "=customers", "=signup", "=signups", "sign up", "sign ups", "=registered", "=accounts", "=account",
@@ -253,7 +303,7 @@ export const PLAN_WORDS: Record<"free" | "plus" | "pro" | "unlimited", string[]>
 // Order = priority when several match ("ghar ka rent" → Rent, not Family).
 export const EXPENSE_CATEGORY_WORDS: [string, string[]][] = [
   ["Fuel", ["petrol", "diesel", "=fuel", "=cng", "पेट्रोल", "डीजल", "ईंधन", "પેટ્રોલ", "ડીઝલ", "ઇંધણ"]],
-  ["Rent", ["=rent", "house rent", "=kiraya", "=kiraaya", "=bhada", "=bhadu", "किराया", "ભાડું", "ભાડુ"]],
+  ["Rent", ["=rent", "house rent", "=kiraya", "=kiraaya", "=bhadu", "ghar bhadu", "किराया", "ભાડું", "ભાડુ"]],
   ["EMI / Debt", ["loan payment", "emi payment", "credit card bill"]],
   ["Utilities", ["electricity", "=bijli", "light bill", "=light", "water bill", "pani bill", "=gas", "cylinder", "internet", "=wifi", "broadband", "recharge", "mobile bill", "phone bill", "=dth", "=bill", "=bills", "बिजली", "पानी का बिल", "गैस", "इंटरनेट", "रिचार्ज", "बिल", "વીજળી", "લાઇટ", "લાઈટ", "પાણી", "ગેસ", "ઇન્ટરનેટ", "રિચાર્જ", "બિલ"]],
   ["Groceries", ["grocery", "groceries", "kirana", "kiraana", "=sabzi", "=sabji", "vegetable", "=fruits", "=fruit", "=doodh", "=dudh", "=milk", "=ration", "dmart", "d mart", "bigbasket", "blinkit", "zepto", "shakbhaji", "=shak", "=karyanu", "=kariyanu", "किराना", "सब्जी", "दूध", "राशन", "फल", "કરિયાણું", "કરિયાણા", "શાકભાજી", "શાક", "દૂધ", "ફળ", "રાશન"]],
@@ -276,7 +326,7 @@ export const INCOME_CATEGORY_WORDS: [string, string[]][] = [
   ["Freelance", ["freelance", "=project", "=client", "फ्रीलांस", "ફ્રીલાન્સ"]],
   ["Business", ["business", "=dhandha", "=dhanda", "=dhandho", "=vyapar", "=vepar", "=dukan", "=profit", "=munafa", "=sale", "=sales", "धंधा", "व्यापार", "बिजनेस", "बिज़नेस", "दुकान", "मुनाफा", "ધંધો", "ધંધા", "વેપાર", "બિઝનેસ", "દુકાન", "નફો"]],
   ["Investment", ["=interest", "=byaj", "=vyaj", "dividend", "=returns", "ब्याज", "लाभांश", "વ્યાજ", "ડિવિડન્ડ"]],
-  ["Rental", ["=rent", "=kiraya", "=bhadu", "=bhada", "rental", "किराया", "ભાડું", "ભાડુ"]],
+  ["Rental", ["=rent", "=kiraya", "=bhadu", "rental", "किराया", "ભાડું", "ભાડુ"]],
   ["Gift", ["=gift", "=tohfa", "=shagun", "=chandlo", "उपहार", "गिफ्ट", "शगुन", "ભેટ", "ગિફ્ટ", "ચાંદલો"]],
   ["Refund", ["refund", "cashback", "=wapsi", "रिफंड", "वापसी", "રિફંડ", "કેશબેક"]],
 ];

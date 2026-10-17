@@ -6,6 +6,13 @@ import { resolveSession, type AuthState } from "./auth";
 import { SESSION_COOKIE, IS_PROD } from "./env";
 import { clientIp } from "./ratelimit";
 import type { Permission } from "./permissions";
+import { keyFor, open as openSealed, sealResponse } from "./secure-channel";
+
+/** AES key of the encrypted channel for this request (set by route(), read by parseBody()). */
+const CHANNEL = new WeakMap<object, Buffer>();
+/** Requests whose encrypted body could not be opened (browser holds an old server key) → tell it to renegotiate. */
+const REKEY = new WeakSet<object>();
+const REQUIRE_ENC = process.env.REQUIRE_ENCRYPTED_API === "true";
 
 // ---------- Consistent responses ----------
 export function ok<T>(data: T, message?: string, status = 200) {
@@ -41,7 +48,32 @@ export function route(opts: Options & { auth: false }, fn: (ctx: BaseCtx) => Pro
 export function route(opts: Options, fn: (ctx: AuthCtx) => Promise<Response>): (req: NextRequest, ctx: NextCtx) => Promise<Response>;
 export function route(opts: Options, fn: (ctx: AuthCtx) => Promise<Response>) {
   return async (req: NextRequest, nextCtx: NextCtx) => {
+    let key: Buffer | null = null;
     try {
+      key = keyFor(req.headers.get("x-bp-key"));
+    } catch (e) {
+      console.error("[api] secure channel key error:", (e as Error)?.message);
+    }
+    if (key) CHANNEL.set(req, key);
+    const res = await run(req, nextCtx, key);
+    if (REKEY.has(req)) {
+      // Nothing was executed. Plain (unsealed) answer so the browser can refresh its key and safely retry.
+      return NextResponse.json({ success: false, message: "Secure connection refreshed — please try again." }, { status: 409, headers: { "x-bp-rekey": "1", "Cache-Control": "no-store" } });
+    }
+    if (!key) return res;
+    try {
+      return await sealResponse(res, key);
+    } catch (e) {
+      console.error("[api] could not encrypt response:", (e as Error)?.message);
+      return res;
+    }
+  };
+
+  async function run(req: NextRequest, nextCtx: NextCtx, key: Buffer | null): Promise<Response> {
+    try {
+      // Pusher's own auth call and the cron job can't use our encrypted channel.
+      const exempt = req.nextUrl.pathname.startsWith("/api/realtime/pusher-auth") || req.nextUrl.pathname.startsWith("/api/cron/");
+      if (REQUIRE_ENC && !key && !exempt && req.method !== "GET" && req.method !== "HEAD") throw new ApiError(400, "Please reload the page (secure connection required).");
       const params = (await nextCtx?.params) ?? {};
       const ip = clientIp(req.headers);
       await connectDB();
@@ -59,7 +91,7 @@ export function route(opts: Options, fn: (ctx: AuthCtx) => Promise<Response>) {
     } catch (err) {
       return handleError(err);
     }
-  };
+  }
 }
 
 export function handleError(err: unknown) {
@@ -77,7 +109,8 @@ export function handleError(err: unknown) {
   if (e?.code === 11000) return fail(409, "This record already exists.");
   if (e?.name === "CastError") return fail(400, "Invalid identifier.");
   if (e?.name === "ValidationError") return fail(400, "Please check the highlighted fields.");
-  console.error("[api] unexpected error:", IS_PROD ? (err as Error)?.message : err);
+  const ee = err as { message?: string; code?: unknown; codeName?: string };
+  console.error("[api] unexpected error:", IS_PROD ? `${ee?.message}${ee?.code ? ` (code ${String(ee.code)}${ee.codeName ? ` ${ee.codeName}` : ""})` : ""}` : err);
   return fail(500, "Something went wrong. Please try again.");
 }
 
@@ -92,6 +125,21 @@ export async function parseBody<S extends ZodTypeAny>(req: NextRequest, schema: 
     const text = await req.text();
     if (text.length > MAX_BODY) throw new ApiError(413, "Request is too large.");
     raw = text ? JSON.parse(text) : {};
+    // Encrypted body from our own frontend → decrypt with this request's channel key.
+    const key = CHANNEL.get(req);
+    if (raw && typeof raw === "object" && typeof (raw as { __e?: unknown }).__e === "string") {
+      let opened: string | null = null;
+      try {
+        opened = key ? openSealed(key, (raw as { __e: string }).__e) : null;
+      } catch {
+        opened = null;
+      }
+      if (opened === null) {
+        REKEY.add(req);
+        throw new ApiError(409, "Secure connection refreshed — please try again.");
+      }
+      raw = JSON.parse(opened);
+    }
   } catch (e) {
     if (e instanceof ApiError) throw e;
     throw Errors.badRequest("Malformed JSON body.");
