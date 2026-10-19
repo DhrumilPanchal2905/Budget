@@ -15,9 +15,12 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 const POLL_MS = 1500;
-const LIFETIME_MS = 55_000;
+// Must end well before maxDuration (60 s) — counted from the START of the request (cold start + DB connect
+// included), otherwise Vercel kills it with "Task timed out after 60 seconds".
+const LIFETIME_MS = 45_000;
 
 export async function GET(req: NextRequest) {
+  const startedAt = Date.now();
   await connectDB();
   const state = await resolveSession(req.cookies.get(SESSION_COOKIE)?.value);
   if (!state) return new Response("Unauthorized", { status: 401 });
@@ -54,7 +57,7 @@ export async function GET(req: NextRequest) {
       send(`retry: 1500\n\n`);
       send(`event: ready\ndata: ${data({ channels: channels.length })}\n\n`);
 
-      const deadline = Date.now() + LIFETIME_MS;
+      const deadline = startedAt + LIFETIME_MS;
       let lastPing = Date.now();
       while (!closed && Date.now() < deadline) {
         try {
