@@ -1,10 +1,11 @@
 // Central SEO facts (one source of truth for metadata, JSON-LD, sitemap, llms.txt).
+import { NEW_TOOLS } from "./tools-registry";
 export const SITE_URL = (process.env.APP_URL || "https://budget.dhrumilpanchal.in").replace(/\/$/, "");
 export const SITE_NAME = "Budget Pro";
 export const AUTHOR = { name: "Dhrumil Panchal", url: "https://dhrumilpanchal.in" };
 export const TAGLINE = "Free AI budget planner & expense tracker — in English, हिंदी and ગુજરાતી";
 export const DESCRIPTION =
-  "Budget Pro is a free, secure budget planner and expense tracker with its own AI assistant, Angel, that understands English, Hindi and Gujarati. Track income, expenses, EMIs and savings goals, set category budgets, get accurate suggestions and a monthly 50/30/20 analysis — by voice or chat.";
+  "Budget Pro is a free, secure budget planner and expense tracker with its own AI assistant, Angel, that understands English, Hindi and Gujarati. Track income, expenses, EMIs and savings goals, set category budgets, get accurate suggestions, 16 free money calculators and a monthly 50/30/20 analysis — by voice or chat.";
 
 export const KEYWORDS = [
   "budget planner",
@@ -28,6 +29,13 @@ export const KEYWORDS = [
   "ખર્ચ ટ્રેકર",
   "hisab kitab app",
   "kharcha app",
+  "income tax calculator",
+  "fd calculator",
+  "ppf calculator",
+  "gst calculator",
+  "AI money assistant",
+  "Hindi AI assistant",
+  "UPI expense tracker",
 ];
 
 /** Public, indexable pages (used by the sitemap, llms.txt and internal links). */
@@ -35,23 +43,26 @@ export const PUBLIC_PAGES: { path: string; title: string; description: string; p
   { path: "/", title: "Budget Pro — AI budget planner & expense tracker", description: DESCRIPTION, priority: 1, freq: "weekly" },
   { path: "/features", title: "Features", description: "Everything in Budget Pro: income & expense tracking, category budgets, EMIs, savings goals, analytics, realtime sync, push reminders and bank-grade security.", priority: 0.9, freq: "monthly" },
   { path: "/angel-ai", title: "Angel AI — your multilingual money assistant", description: "Angel is Budget Pro's own AI. Ask about your money in English, Hindi or Gujarati — by voice or text — and get accurate answers, reasons and suggestions from your real data.", priority: 0.9, freq: "monthly" },
-  { path: "/pricing", title: "Pricing", description: "Start free. Plus and Pro add more records and advanced insights; Unlimited includes Angel AI.", priority: 0.8, freq: "monthly" },
-  { path: "/tools", title: "Free money calculators", description: "Free EMI calculator, 50/30/20 budget planner, savings goal calculator and SIP calculator — no sign-up needed.", priority: 0.8, freq: "monthly" },
+  { path: "/pricing", title: "Pricing", description: "Free forever, or Plus ₹50, Pro ₹100 and Unlimited ₹500 a month. Every plan includes Angel AI; pay with UPI, card or netbanking.", priority: 0.8, freq: "monthly" },
+  { path: "/tools", title: "Free money calculators", description: "16 free calculators: income tax (FY 2026-27), EMI, SIP, FD, RD, PPF, GST, retirement, loan prepayment, currency converter and more — no sign-up.", priority: 0.8, freq: "monthly" },
   { path: "/tools/emi-calculator", title: "EMI calculator", description: "Calculate your loan EMI, total interest and full repayment instantly — home, car, personal or education loan.", priority: 0.8, freq: "monthly" },
   { path: "/tools/budget-planner", title: "50/30/20 budget planner", description: "Split your monthly income into needs, wants and savings with the 50/30/20 rule — free budget calculator.", priority: 0.8, freq: "monthly" },
   { path: "/tools/savings-goal-calculator", title: "Savings goal calculator", description: "Find out how much to save every month to reach any goal by your target date.", priority: 0.7, freq: "monthly" },
   { path: "/tools/sip-calculator", title: "SIP calculator", description: "Estimate how a monthly SIP grows with compounding over time.", priority: 0.7, freq: "monthly" },
+  ...NEW_TOOLS.map((t) => ({ path: `/tools/${t.slug}`, title: t.title, description: t.description, priority: 0.7, freq: "monthly" as const })),
   { path: "/faq", title: "FAQ", description: "Answers about Budget Pro: security, Angel AI languages, budgets, goals, EMIs, plans and data privacy.", priority: 0.7, freq: "monthly" },
   { path: "/about", title: "About", description: "Why Budget Pro exists and who builds it.", priority: 0.5, freq: "yearly" },
   { path: "/register", title: "Create a free account", description: "Create your free Budget Pro account in under a minute.", priority: 0.7, freq: "yearly" },
   { path: "/login", title: "Sign in", description: "Sign in to Budget Pro.", priority: 0.4, freq: "yearly" },
   { path: "/privacy", title: "Privacy policy", description: "How Budget Pro collects, uses and protects your data.", priority: 0.3, freq: "yearly" },
+  { path: "/refund-policy", title: "Refund & cancellation policy", description: "Refunds and cancellations for Budget Pro paid plans — no auto-renewal, 7-day refunds.", priority: 0.3, freq: "yearly" },
+  { path: "/contact", title: "Contact", description: "Contact Budget Pro for account, payment or refund questions.", priority: 0.4, freq: "yearly" },
   { path: "/terms", title: "Terms of service", description: "The terms for using Budget Pro.", priority: 0.3, freq: "yearly" },
 ];
 
 export const FAQ: { q: string; a: string }[] = [
-  { q: "Is Budget Pro free?", a: "Yes. The Free plan includes 100 finance records, 3 savings goals, dashboards, budgets, basic insights and realtime sync. Plus and Pro raise the limits and add advanced insights; Unlimited (assigned by an admin) also includes the Angel AI assistant." },
-  { q: "What is Angel AI?", a: "Angel is Budget Pro's own AI assistant, built in-house without any third-party AI service. It answers questions about your money from your real data, explains why things changed, plans savings, checks budgets and goals, and can add entries for you — by voice or chat." },
+  { q: "Is Budget Pro free?", a: "Yes. The Free plan includes 100 finance records, 3 savings goals, dashboards, budgets, realtime sync and Angel AI (20 credits every 5 hours). Plus (₹50/month), Pro (₹100/month) and Unlimited (₹500/month) raise the limits; Unlimited has no limits at all. Plans are paid monthly with UPI, card or netbanking and never auto-renew." },
+  { q: "What is Angel AI?", a: "Angel is Budget Pro's own AI assistant, built in-house without any third-party AI service. It answers questions about your money from your real data, explains why things changed, plans savings, checks budgets and goals, does EMI / SIP / FD / tax maths, and can add, edit or delete entries for you — by voice or chat. General questions are looked up on the web with sources. You can even try it without an account." },
   { q: "Which languages does Angel understand?", a: "English, Hindi (हिंदी), Gujarati (ગુજરાતી) and Hinglish / romanised Gujarati — in native script or English letters, typed or spoken. Replies come in the language you ask in, or the one you choose in Settings." },
   { q: "Is my financial data safe?", a: "Passwords are hashed with Argon2id, sessions use HttpOnly secure cookies, every API request and response is end-to-end encrypted on top of HTTPS, data is strictly isolated per user, and every sensitive action is audited. Budget Pro never sells your data." },
   { q: "Do I need to connect my bank account?", a: "No. You add income and expenses yourself (or just tell Angel, e.g. “petrol 500”). Salary, rent and bills can auto-repeat every month." },

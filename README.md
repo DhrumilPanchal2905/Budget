@@ -5,7 +5,31 @@ Production URL: **https://budget.dhrumilpanchal.in**
 
 ---
 
-## 🚀 What's new in v2 (read this first)
+## 🆕 What's new in v3
+
+| Area | What changed |
+|---|---|
+| **Angel in every plan** | Free 20 credits / 5 h · Plus 80 · Pro 250 · Unlimited no limit. A window starts with the first message and refills when it ends. Simple question = 1 credit; long questions, web look-ups and actions cost more (`src/lib/plans.ts` → `ANGEL_COST`). Live credit bar in the Angel panel and on the Plan page. |
+| **Angel without login** | Visitors on public pages get a guest Angel (8 credits / 6 h per device, looser per-IP pool): money knowledge, calculators, web answers. Personal questions show "create free account". No database data is ever read for guests. |
+| **Web answers** | Questions about the world ("google karo…", gold/petrol rate, news, "taj mahal kisne banaya") are looked up on the web and answered word-for-word from the sources, with links. Free sources by default (Wikipedia + DuckDuckGo); add `SERPER_API_KEY` for Google results. Personal questions always use your own data first. |
+| **Calculators in chat** | "5 lakh loan 9% 5 saal EMI", "5000 SIP 10 saal", "1 lakh FD 7% 3 saal", "5000 pe 18% GST", "100 dollar kitne rupaye" (live rate). |
+| **More accurate Angel** | New held-out test set (117 fresh questions) scored 91% first time, 100% after tuning; all older sets still 100%. Better voice-guess picking, "my plan" and admin revenue questions. |
+| **Voice & mic** | Angel ranks every installed voice and uses the most natural one (Edge "Natural", Google, Apple Enhanced), with a voice picker + test button. Mic sends 5 guesses; the server picks the one that makes the most sense. |
+| **Payments (Razorpay)** | Plus ₹50, Pro ₹100, Unlimited ₹500 per month. UPI / cards / netbanking / wallets. Plan activates only after signature check + confirmation from Razorpay's API; webhook as backup; exactly-once activation; upgrades carry unused days over by value; no auto-renew; expiry + 3-day reminder in the daily job. Receipt email to the user, alert email + notification to admins, invoice page (BP/2026-27/00001), Admin → Payments with revenue. |
+| **Policies for Razorpay** | `/refund-policy`, `/contact`, updated `/terms`, `/privacy`, `/pricing`. |
+| **16 free tools** | Income tax FY 2026-27 (new vs old), FD, RD, PPF, GST, inflation, loan prepayment, compound interest, retirement, emergency fund, net worth, live currency converter (+ EMI, SIP, 50/30/20, savings goal). |
+| **SEO / ASO** | Sitemap with all tools & policies, robots (AI bots allowed, private pages blocked), richer manifest with screenshots + shortcuts, `/.well-known/assetlinks.json` for a Google Play TWA, Product/FAQ/ItemList JSON-LD, `BingSiteAuth.xml` served from `/public`. |
+| **Speed** | Session + user now load in ONE database round trip (shared by parallel requests for 3 s), `Server-Timing` header on every API response, Admin → Settings → Speed check shows the server region and DB latency. |
+
+### ✅ Deploy checklist for v3
+1. `npm install` → `npm run test:angel` → `npm run build`.
+2. Vercel → Environment Variables: add `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `BUSINESS_*` (see `.env.example`), optional `SERPER_API_KEY`. Redeploy.
+3. Razorpay → Webhooks: `https://budget.dhrumilpanchal.in/api/billing/webhook`, events `payment.captured`, `payment.failed`, `order.paid`, `payment.refunded`, same secret.
+4. Test with `rzp_test_` keys (test UPI `success@razorpay`), then switch to `rzp_live_` keys after KYC.
+5. Admin → Settings → Speed check: if the database round trip is above ~25 ms, move the Atlas cluster to Mumbai (ap-south-1) — `vercel.json` already runs the server in `bom1` (Mumbai).
+6. Search Console / Bing → resubmit `sitemap.xml`.
+
+## 🚀 What's new in v2
 
 | Area | What changed |
 |---|---|
@@ -227,7 +251,7 @@ Use `.env.local` for development and Vercel's **Production** environment for pro
 - Plan-limit checks count then insert, so two simultaneous requests could exceed a limit by one record.
 - The Inter font is downloaded by `next/font` at build time (Vercel builds have internet).
 
-## 13. Angel AI (Unlimited plan + admins)
+## 13. Angel AI (every plan, guests, admins)
 
 Angel is Budget Pro's **own** assistant — no OpenAI/Gemini/any third-party AI. Every answer is computed on our server from the user's MongoDB data, so numbers always match the dashboard.
 
@@ -241,7 +265,7 @@ Angel is Budget Pro's **own** assistant — no OpenAI/Gemini/any third-party AI.
 | UI: live orb, voice ("Angel active" wake word, speech-to-text, spoken replies), chat, history, settings | `src/components/angel/*` |
 | Chat history (text only, per user, deletable per message / per chat / all) | collections `angelconversations`, `angelmessages` |
 
-**Access rules (enforced on the server):** Angel needs the Unlimited plan (admins always have it). A normal user only ever sees and changes their own data. An admin can ask about themselves, any user ("Ravi ka balance"), or the whole platform ("kitne users hain", "sabka is mahine ka kharcha"); writing into another user's account, creating users, changing plans and deleting entries always ask for confirmation first. All actions reuse the existing finance functions → plan limits, validation, audit log, realtime refresh and notifications work exactly as in the app. Actions can be undone for 24 hours. Temporary passwords for users created by Angel are shown once and never stored.
+**Access rules (enforced on the server):** Angel is in every plan (limited plans have credits per window; Unlimited and admins have no limit; visitors get a guest Angel with no data access). A normal user only ever sees and changes their own data. An admin can ask about themselves, any user ("Ravi ka balance"), or the whole platform ("kitne users hain", "sabka is mahine ka kharcha"); writing into another user's account, creating users, changing plans and deleting entries always ask for confirmation first. All actions reuse the existing finance functions → plan limits, validation, audit log, realtime refresh and notifications work exactly as in the app. Actions can be undone for 24 hours. Temporary passwords for users created by Angel are shown once and never stored.
 
 **Voice flow:** say “Angel active” (or tap the orb) → speak → **pause ~1.2 s and it sends by itself** (adjustable in Angel settings: 0.8 / 1.2 / 1.8 s) → Angel answers out loud → keeps listening for the next question → “Angel band karo” ends it. The browser's alternative guesses are sent too, so a misheard word ("belens") is still understood.
 

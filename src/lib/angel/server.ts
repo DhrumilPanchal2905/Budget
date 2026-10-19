@@ -2,20 +2,28 @@
 import { AngelConversation, AngelMessage, isObjectId, oid, type UserDoc } from "../models";
 import { planForUser } from "../plans";
 import { ApiError, Errors } from "../errors";
+import type { QuotaState } from "./quota";
 import { actionView, claimAction, undoAction, undoText, type StoredAction } from "./engine";
 import type { Lang } from "./parse";
-import type { AngelMessageDTO, Card, ConversationDTO } from "./types";
+import type { AngelMessageDTO, AngelQuotaDTO, Card, ConversationDTO } from "./types";
 import type { Permission } from "../permissions";
 
-/** Angel is part of the Unlimited plan (every admin has it). `ANGEL_ENABLED=false` switches it off instantly. */
-export function angelEnabledFor(user: Pick<UserDoc, "plan" | "role">): boolean {
-  if (process.env.ANGEL_ENABLED === "false") return false;
-  return planForUser(user).unlimited;
+/**
+ * Angel is part of EVERY plan (limited plans have credits per window — see quota.ts).
+ * `ANGEL_ENABLED=false` switches it off instantly for everyone.
+ */
+export function angelEnabledFor(_user?: Pick<UserDoc, "plan" | "role">): boolean {
+  return process.env.ANGEL_ENABLED !== "false";
 }
 
-export function assertAngel(user: UserDoc) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function assertAngel(_user?: UserDoc) {
   if (process.env.ANGEL_ENABLED === "false") throw new ApiError(503, "Angel AI is turned off right now.");
-  if (!planForUser(user).unlimited) throw Errors.planLimit("Angel AI is available on the Unlimited plan.");
+}
+
+/** Quota state for the browser. */
+export function quotaDTO(state: QuotaState, user: Parameters<typeof planForUser>[0] | null): AngelQuotaDTO {
+  return { ...state, plan: user ? planForUser(user).id : "guest" };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

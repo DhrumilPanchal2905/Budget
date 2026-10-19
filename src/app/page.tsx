@@ -16,6 +16,7 @@ const features = [
   { icon: Zap, title: "Auto-repeat entries", text: "Salary, rent, SIPs and bills add themselves every month — never back-filled, always notified." },
   { icon: Radio, title: "Realtime sync", text: "Phone, laptop and tablet update instantly when anything changes." },
   { icon: Bell, title: "Reminders & push", text: "EMI reminders, budget alerts and goal milestones on your phone." },
+  { icon: Calculator, title: "16 free calculators", text: "Income tax (new vs old regime), EMI, SIP, FD, RD, PPF, GST, retirement, prepayment and a live currency converter." },
   { icon: ShieldCheck, title: "Bank-grade security", text: "Argon2id passwords, HttpOnly sessions, email-verified sign-ups and end-to-end encrypted API traffic." },
 ];
 
@@ -66,7 +67,8 @@ export default function Home() {
             <h2 id="angel-h" className="mt-2 text-2xl font-semibold tracking-tight">Ask in your language. Get a real answer.</h2>
             <p className="mt-3 text-sm text-muted">
               Angel is built in-house — no third-party AI — and trained on how people actually talk about money in India: Hindi, Gujarati, Hinglish, typos and all. It doesn&apos;t just
-              show numbers; it compares with your usual, explains what changed, checks your budgets and goals, and offers the next step. It can also add entries, set budgets and undo.
+              show numbers; it compares with your usual, explains what changed, checks your budgets and goals, and offers the next step. It can add, edit and delete entries, do EMI / SIP / tax
+              maths, and look general questions up on the web with sources. Try it right now — the orb at the bottom right works without an account.
             </p>
             <Link href="/angel-ai" className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
               How Angel works <ArrowRight className="h-4 w-4" />
@@ -116,12 +118,15 @@ export default function Home() {
 
       <section className="relative mx-auto max-w-5xl px-5 pb-20" id="pricing" aria-labelledby="pricing-h">
         <h2 id="pricing-h" className="text-center text-2xl font-semibold tracking-tight sm:text-3xl">Simple plans</h2>
-        <p className="mt-2 text-center text-sm text-muted">Start free. Upgrade when you need more.</p>
-        <div className="mt-10 grid gap-4 md:grid-cols-3">
+        <p className="mt-2 text-center text-sm text-muted">Start free. Every plan includes Angel AI. Pay monthly with UPI, card or netbanking — no auto-renewal.</p>
+        <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {PUBLIC_PLAN_IDS.map((id) => PLANS[id]).map((p) => (
-            <div key={p.id} className={`flex flex-col rounded-2xl border bg-surface p-6 ${p.id === "plus" ? "border-primary/50 ring-1 ring-primary/30" : "border-border"}`}>
+            <div key={p.id} className={`flex flex-col rounded-2xl border bg-surface p-6 ${p.id === "pro" ? "border-primary/50 ring-1 ring-primary/30" : "border-border"}`}>
               <h3 className="text-sm font-semibold">{p.name}</h3>
-              <p className="mt-2 text-3xl font-semibold">{p.priceLabel}</p>
+              <p className="mt-2 text-3xl font-semibold">
+                ₹{p.priceInr}
+                <span className="text-sm font-normal text-muted">{p.priceInr ? " /month" : " forever"}</span>
+              </p>
               <ul className="mt-5 flex-1 space-y-2 text-sm">
                 {p.features.map((f) => (
                   <li key={f} className="flex gap-2 text-muted">

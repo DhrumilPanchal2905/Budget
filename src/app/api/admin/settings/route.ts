@@ -4,6 +4,9 @@ import { getSetting, setSetting, encryptSecret } from "@/lib/settings";
 import { resolveMail, type MailSettings } from "@/lib/mailer";
 import { audit } from "@/lib/audit";
 import { ApiError } from "@/lib/errors";
+import { razorpayMode } from "@/lib/razorpay";
+import { webSearchConfigured } from "@/lib/web-search";
+import { APP_URL } from "@/lib/env";
 
 export const runtime = "nodejs";
 
@@ -18,6 +21,8 @@ async function view() {
       envFallback: { user: process.env.SMTP_USER || null, hasPassword: Boolean(process.env.SMTP_PASS) },
     },
     security: { encryptedApi: true, requireEncryption: process.env.REQUIRE_ENCRYPTED_API === "true" },
+    payments: { mode: razorpayMode(), webhook: Boolean(process.env.RAZORPAY_WEBHOOK_SECRET), webhookUrl: `${APP_URL}/api/billing/webhook` },
+    webSearch: { provider: webSearchConfigured() },
   };
 }
 

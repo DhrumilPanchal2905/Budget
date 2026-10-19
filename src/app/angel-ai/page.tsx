@@ -56,7 +56,7 @@ export default function AngelPage() {
           <li>Voice works with a wake word (“Angel active”) and stops with “Angel band karo”.</li>
         </ul>
         <p>
-          Angel is included in the Unlimited plan. <Link href="/pricing">See plans</Link> · <Link href="/register">Create a free account</Link>
+          Angel is included in every plan — Free gets 20 credits every 5 hours, Unlimited has no limit — and you can try it right now without an account (tap the orb). <Link href="/pricing">See plans</Link> · <Link href="/register">Create a free account</Link>
         </p>
       </Prose>
     </PublicShell>

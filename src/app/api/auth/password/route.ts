@@ -1,3 +1,4 @@
+import { invalidateUserCache } from "@/lib/auth";
 import { route, ok, parseBody } from "@/lib/api";
 import { changePasswordSchema } from "@/lib/validation";
 import { rateLimit } from "@/lib/ratelimit";
@@ -22,6 +23,7 @@ export const POST = route({}, async ({ req, user, ip, sessionId }) => {
 
   // Sign out every OTHER device.
   await Session.deleteMany({ userId: user._id, _id: { $ne: sessionId } });
+  invalidateUserCache(String(user._id));
   await audit({ actor: user, action: "auth.password_change", resource: "user", resourceId: String(user._id), targetUserId: String(user._id), ip });
   await notifyUser(String(user._id), {
     type: "system",

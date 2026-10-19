@@ -48,6 +48,7 @@ export function route(opts: Options & { auth: false }, fn: (ctx: BaseCtx) => Pro
 export function route(opts: Options, fn: (ctx: AuthCtx) => Promise<Response>): (req: NextRequest, ctx: NextCtx) => Promise<Response>;
 export function route(opts: Options, fn: (ctx: AuthCtx) => Promise<Response>) {
   return async (req: NextRequest, nextCtx: NextCtx) => {
+    const t0 = performance.now();
     let key: Buffer | null = null;
     try {
       key = keyFor(req.headers.get("x-bp-key"));
@@ -59,6 +60,12 @@ export function route(opts: Options, fn: (ctx: AuthCtx) => Promise<Response>) {
     if (REKEY.has(req)) {
       // Nothing was executed. Plain (unsealed) answer so the browser can refresh its key and safely retry.
       return NextResponse.json({ success: false, message: "Secure connection refreshed — please try again." }, { status: 409, headers: { "x-bp-rekey": "1", "Cache-Control": "no-store" } });
+    }
+    try {
+      // how long the server took (visible in the browser's Network → Timing tab)
+      res.headers.set("Server-Timing", `app;dur=${Math.round(performance.now() - t0)}`);
+    } catch {
+      /* immutable headers */
     }
     if (!key) return res;
     try {

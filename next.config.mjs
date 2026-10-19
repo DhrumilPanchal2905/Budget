@@ -3,6 +3,7 @@
 const isProd = process.env.NODE_ENV === "production";
 
 // Content Security Policy. Pusher is only contacted when NEXT_PUBLIC_PUSHER_KEY is set.
+// Razorpay Checkout (payments) loads its script + iframe from *.razorpay.com.
 const csp = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -10,11 +11,12 @@ const csp = [
   "form-action 'self'",
   "object-src 'none'",
   // Next.js needs inline scripts for hydration + our no-flash theme script.
-  `script-src 'self' 'unsafe-inline'${isProd ? "" : " 'unsafe-eval'"}`,
+  `script-src 'self' 'unsafe-inline'${isProd ? "" : " 'unsafe-eval'"} https://checkout.razorpay.com`,
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
-  "img-src 'self' data: blob:",
-  "connect-src 'self' wss://*.pusher.com https://*.pusher.com https://sockjs.pusher.com",
+  "img-src 'self' data: blob: https://*.razorpay.com",
+  "connect-src 'self' wss://*.pusher.com https://*.pusher.com https://sockjs.pusher.com https://*.razorpay.com",
+  "frame-src https://api.razorpay.com https://checkout.razorpay.com",
   "worker-src 'self'",
   "manifest-src 'self'",
   ...(isProd ? ["upgrade-insecure-requests"] : []),
@@ -26,8 +28,10 @@ const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   // microphone=(self): only Budget Pro itself may use the mic (Angel AI voice). Everything else stays blocked.
-  { key: "Permissions-Policy", value: "camera=(), microphone=(self), geolocation=(), payment=()" },
-  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+  // payment: Razorpay's checkout iframe may use the Payment Request API (UPI apps / cards)
+  { key: "Permissions-Policy", value: 'camera=(), microphone=(self), geolocation=(), payment=(self "https://api.razorpay.com")' },
+  // allow-popups: bank / 3-D Secure pages opened by Razorpay Checkout must be able to report back
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
   ...(isProd
     ? [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" }]
     : []),
@@ -41,6 +45,10 @@ const nextConfig = {
   compress: true,
   // Speed: only ship the icons / chart parts a page actually uses.
   experimental: { optimizePackageImports: ["lucide-react", "recharts"] },
+  // Android (Google Play TWA) verification file → served by /api/assetlinks
+  async rewrites() {
+    return [{ source: "/.well-known/assetlinks.json", destination: "/api/assetlinks" }];
+  },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

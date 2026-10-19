@@ -1,3 +1,4 @@
+import { invalidateUserCache } from "@/lib/auth";
 import { route, parseBody, ok } from "@/lib/api";
 import { resetPasswordSchema } from "@/lib/validation";
 import { rateLimit } from "@/lib/ratelimit";
@@ -23,6 +24,7 @@ export const POST = route({ auth: false }, async ({ req, ip }) => {
   user.emailVerified = true;
   await user.save();
   await Session.deleteMany({ userId: user._id });
+  invalidateUserCache(String(user._id));
   await publish([userChannel(String(user._id))], "session:revoked", {});
   await audit({ actor: user, action: "auth.password_reset", resource: "user", resourceId: String(user._id), targetUserId: String(user._id), metadata: { via: "email_otp" }, ip });
   await notifyUser(String(user._id), { type: "system", title: "Password reset", message: "Your password was reset with an email code. If this wasn't you, contact support immediately.", link: "/settings" });

@@ -18,6 +18,7 @@ interface Stats {
   recent: { id: string; action: string; actorEmail: string; resource: string | null; createdAt: string }[];
   live?: { onlineNow: number; visitors24h: number; newUsers7d: number; unverified: number };
   angel?: { conversations: number; questions7d: number };
+  revenue?: { all: number; payments: number; month: number; monthPayments: number };
   email?: { ready: boolean; source: string; from: string };
 }
 
@@ -96,10 +97,11 @@ function Inner() {
   return (
     <div className="space-y-4">
       {data.live && (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
           <Link href="/admin/visitors"><StatCard label="Online now" value={data.live.onlineNow} icon={<Radio className="h-4 w-4 text-success" />} tone={data.live.onlineNow ? "success" : "default"} hint={`${data.live.visitors24h} visitors in 24h →`} /></Link>
           <StatCard label="New users (7 days)" value={data.live.newUsers7d} icon={<UserPlus className="h-4 w-4" />} hint={data.live.unverified ? `${data.live.unverified} unverified` : "all verified"} />
           <StatCard label="Angel AI" value={data.angel?.questions7d ?? 0} icon={<Bot className="h-4 w-4" />} hint={`questions in 7 days · ${data.angel?.conversations ?? 0} chats`} />
+          <Link href="/admin/payments"><StatCard label="Revenue this month" value={`₹${(data.revenue?.month ?? 0).toLocaleString("en-IN")}`} icon={<IndianRupee className="h-4 w-4 text-success" />} tone={(data.revenue?.month ?? 0) > 0 ? "success" : "default"} hint={`${data.revenue?.monthPayments ?? 0} payments · ₹${(data.revenue?.all ?? 0).toLocaleString("en-IN")} all time →`} /></Link>
           <Link href="/admin/settings"><StatCard label="OTP email" value={data.email?.ready ? "Working" : "Not set up"} icon={<Mail className="h-4 w-4" />} tone={data.email?.ready ? "success" : "danger"} hint={data.email?.ready ? data.email.from : "Add Gmail App Password →"} /></Link>
         </div>
       )}

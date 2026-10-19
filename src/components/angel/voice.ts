@@ -41,7 +41,7 @@ export function listen(opts: ListenOptions): { stop: () => void } {
   rec.lang = opts.lang;
   rec.continuous = opts.continuous;
   rec.interimResults = true;
-  rec.maxAlternatives = 3; // more guesses → better chance one of them is understood
+  rec.maxAlternatives = 5; // more guesses → the server picks the one that makes the most sense
   let stopped = false;
   rec.onresult = (e: any) => {
     const results = Array.from(e.results as ArrayLike<any>);
@@ -63,7 +63,7 @@ export function listen(opts: ListenOptions): { stop: () => void } {
     const text = join(current.map((r) => pick(r, 0)));
     const full = join(results.map((r) => pick(r, 0)));
     const alts: string[] = [];
-    for (let k = 1; k < 3; k++) {
+    for (let k = 1; k < 5; k++) {
       const alt = join(results.map((r) => pick(r, k)));
       if (alt && alt !== full && !alts.includes(alt)) alts.push(alt);
     }
@@ -208,14 +208,20 @@ export async function startMicMeter(): Promise<MicMeter | null> {
 }
 
 // ---------------- text-to-speech ----------------
+// The browser's own voices are used (no audio is sent anywhere). Quality differs a lot between devices, so Angel
+// RANKS every installed voice and picks the most natural one for the language:
+//   Edge "… Online (Natural)" neural voices (Swara / Neerja / Dhwani …) → Google voices (Chrome) →
+//   Apple "Enhanced / Premium" voices (Lekha, Veena …) → anything else. Robotic engines (eSpeak) come last.
+// The user can also choose a voice in Angel settings (saved per device).
 const VOICE_LANG: Record<string, string[]> = {
   en: ["en-IN", "en-GB", "en-US", "en"],
   hn: ["en-IN", "hi-IN", "en"],
   hi: ["hi-IN", "hi"],
   gu: ["gu-IN", "gu"],
 };
-// Natural-sounding female voices first (Angel is "she").
-const PREFERRED = /(google|natural|neural|online|heera|swara|kalpana|neerja|dhwani|lekha|veena|female|aditi|raveena|priya)/i;
+const FEMALE = /(swara|neerja|dhwani|kalpana|heera|lekha|veena|aditi|raveena|priya|kajal|ananya|aarohi|zira|aria|jenny|sonia|libby|samantha|karen|moira|tessa|female|woman)/i;
+const NATURAL = /(natural|neural|online|enhanced|premium|wavenet|studio)/i;
+const ROBOTIC = /(espeak|compact|mbrola|festival|pico)/i;
 
 let voicesCache: SpeechSynthesisVoice[] = [];
 function voices(): SpeechSynthesisVoice[] {
@@ -228,13 +234,57 @@ if (typeof window !== "undefined" && ttsSupported()) {
   window.speechSynthesis.onvoiceschanged = () => voices();
 }
 
-export function pickVoice(lang: string): SpeechSynthesisVoice | null {
+const norm = (l: string) => l.toLowerCase().replace("_", "-");
+
+function voiceScore(v: SpeechSynthesisVoice, lang: string): number {
+  const codes = VOICE_LANG[lang] ?? ["en-IN"];
+  const vl = norm(v.lang);
+  let score = -1;
+  codes.forEach((c, i) => {
+    const cl = c.toLowerCase();
+    if (vl === cl) score = Math.max(score, 100 - i * 12);
+    else if (vl.startsWith(cl) || (cl.length === 2 && vl.startsWith(`${cl}-`))) score = Math.max(score, 80 - i * 12);
+  });
+  if (score < 0) return -1;
+  if (NATURAL.test(v.name)) score += 45;
+  if (/google/i.test(v.name)) score += 28;
+  if (FEMALE.test(v.name)) score += 12; // Angel is "she"
+  if (ROBOTIC.test(v.name)) score -= 60;
+  if (!v.localService) score += 4; // network voices are usually higher quality
+  return score;
+}
+
+/** Voices for a language, best first (for the settings picker). */
+export function listVoices(lang: string): { name: string; label: string; natural: boolean }[] {
+  return voices()
+    .map((v) => ({ v, s: voiceScore(v, lang) }))
+    .filter((x) => x.s >= 0)
+    .sort((a, b) => b.s - a.s)
+    .map(({ v }) => ({ name: v.name, label: `${v.name.replace(/^Microsoft\s+/, "").replace(/\s*-\s*.*$/, "")} (${v.lang})`, natural: NATURAL.test(v.name) || /google/i.test(v.name) }));
+}
+
+export function pickVoice(lang: string, preferred?: string | null): SpeechSynthesisVoice | null {
   const all = voices();
-  for (const code of VOICE_LANG[lang] ?? ["en-IN"]) {
-    const matches = all.filter((v) => v.lang.toLowerCase().replace("_", "-").startsWith(code.toLowerCase()));
-    if (matches.length) return matches.find((v) => PREFERRED.test(v.name)) ?? matches[0];
+  if (preferred) {
+    const p = all.find((v) => v.name === preferred);
+    if (p && voiceScore(p, lang) >= 0) return p;
   }
-  return null;
+  let best: SpeechSynthesisVoice | null = null;
+  let bestScore = -1;
+  for (const v of all) {
+    const sc = voiceScore(v, lang);
+    if (sc > bestScore) {
+      best = v;
+      bestScore = sc;
+    }
+  }
+  return best;
+}
+
+/** Preferred voice names per reply language (set from Angel settings). */
+const chosen: Record<string, string | null> = {};
+export function setPreferredVoice(lang: string, name: string | null) {
+  chosen[lang] = name;
 }
 
 export function canSpeak(lang: string): boolean {
@@ -246,7 +296,8 @@ export function speak(text: string, lang: string, onBoundary?: () => void): { do
   if (!ttsSupported() || !text.trim()) return { done: Promise.resolve(), stop: () => {} };
   const synth = window.speechSynthesis;
   synth.cancel();
-  const voice = pickVoice(lang);
+  const voice = pickVoice(lang, chosen[lang] ?? null);
+  const natural = !!voice && (NATURAL.test(voice.name) || /google/i.test(voice.name));
   const parts = text
     .split(/[.!?।](?=\s|$)|\n+/)
     .map((s) => s.trim())
@@ -271,8 +322,9 @@ export function speak(text: string, lang: string, onBoundary?: () => void): { do
         u.voice = voice;
         u.lang = voice.lang;
       } else u.lang = (VOICE_LANG[lang] ?? ["en-IN"])[0];
-      u.rate = lang === "en" ? 1.02 : 0.98;
-      u.pitch = 1.05;
+      // natural voices sound best untouched; basic voices get a slightly calmer, warmer delivery
+      u.rate = natural ? 1 : lang === "en" ? 0.98 : 0.95;
+      u.pitch = natural ? 1 : 1.06;
       u.onboundary = () => onBoundary?.();
       u.onend = next;
       u.onerror = next;

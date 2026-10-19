@@ -6,6 +6,7 @@
 
 export const CORPUS: Record<string, string[]> = {
   balance: [
+    "khate me kitna hai", "account me total kitna hai", "khata balance batao", "mera total kya bacha hai", "savings account me kitna hai", "खाते में कुल कितना है",
     "what is my balance", "how much money do i have", "how much is left", "how much do i have left", "money left in my account", "what's left in my wallet", "current balance", "net balance please", "my bank balance", "available money", "total money i have", "net worth",
     "mera balance kitna hai", "mere paas kitne paise hai", "kitna paisa bacha hai", "account me kitna paisa pada hai", "abhi kitne rupay hai mere pass", "kitna paisa pada hai", "total kitna jama hai", "mera total paisa", "net worth batao", "kitne paise reh gaye", "bacha hua paisa kitna", "bank me kitna hai",
     "मेरा बैलेंस कितना है", "मेरे पास कितने पैसे हैं", "कितना पैसा बचा है", "अभी कितने पैसे हैं", "खाते में कितना पैसा है", "कुल कितना जमा है",
@@ -20,6 +21,7 @@ export const CORPUS: Record<string, string[]> = {
     "ketlo kharch thayo", "aa mahine ketlo kharch karyo", "september ma ketlo kharch thayo", "ketla vaparya",
   ],
   income: [
+    "is mahine kitne paise aaye", "kitna paisa aaya", "इस महीने कितना पैसा आया", "पैसे कितने आए", "ketla paisa aavya", "આ મહિને કેટલા પૈસા આવ્યા",
     "how much did i earn", "my income this month", "how much salary did i get", "total income this year", "income last month", "how much money came in", "earnings this month",
     "kitna kamaya", "is mahine kitni income hui", "salary kitni aayi", "meri kamai kitni hai", "pichle mahine kitna kamaya", "kitne paise aaye", "aamdani kitni hui", "total income batao",
     "मेरी कमाई कितनी है", "इस महीने कितनी आमदनी हुई", "सैलरी कितनी आई", "कितना कमाया",
@@ -62,6 +64,7 @@ export const CORPUS: Record<string, string[]> = {
     "sauthi moto kharch kayo", "sauthi mongho kharch",
   ],
   recent: [
+    "aaj ki entries dikhao", "aaj kya kya add kiya", "kaun kaun si entry hui", "kya kya entries hai", "today's entries", "आज की एंट्री दिखाओ", "આજની એન્ટ્રી બતાવો",
     "show recent transactions", "my last entries", "latest expenses", "show my last 5 transactions", "what did i add recently", "last transaction",
     "last transactions dikhao", "meri last 5 entries dikhao", "aakhri kharcha kya tha", "haal ki entries", "recent lenden dikhao",
     "आखिरी लेनदेन दिखाओ", "हाल की एंट्री", "आखिरी खर्च क्या था",
@@ -69,6 +72,7 @@ export const CORPUS: Record<string, string[]> = {
     "chhella vyavahar batavo",
   ],
   debts: [
+    "loan ki details batao", "mere loan ka haal", "लोन की डिटेल बताओ", "मेरे कर्ज की जानकारी दो", "loan information", "મારી લોનની વિગત",
     "how much loan is left", "when is my next emi", "show my loans", "when will i be debt free", "how much do i owe", "my emis", "loan status", "debt summary",
     "loan kitna baaki hai", "next emi kab hai", "emi kab bharni hai", "kitna karz baaki hai", "loan kab khatam hoga", "mere loans dikhao", "udhar kitna hai", "kist kab hai",
     "लोन कितना बाकी है", "अगली EMI कब है", "कर्ज कितना है", "लोन कब खत्म होगा",
@@ -76,6 +80,7 @@ export const CORPUS: Record<string, string[]> = {
     "loan ketli baki che", "hapto kyare che",
   ],
   goals: [
+    "goals kaise chal rahe", "mera goal kaisa chal raha hai", "goals ka haal batao", "गोल कैसे चल रहे हैं", "how are my savings goals going", "ગોલ કેવા ચાલે છે",
     "show my goals", "how are my goals doing", "am i on track for my goals", "goal progress", "when will i reach my goal", "savings goals status", "how much more for my goal",
     "mere goals dikhao", "goals ki progress batao", "mera goal kab tak pura hoga", "bike wala goal kitna hua", "goal me kitna jama hua", "target kab tak pahunchega", "goal on track hai kya",
     "मेरे गोल दिखाओ", "गोल कब पूरा होगा", "लक्ष्य की प्रगति",
@@ -83,6 +88,7 @@ export const CORPUS: Record<string, string[]> = {
     "mara goal batavo", "goal kyare puro thase",
   ],
   budget_status: [
+    "am i under budget", "budget ke andar hu kya", "within my budget or not", "bajat ke andar hai kya", "क्या मैं बजट के अंदर हूं",
     "am i over budget", "budget status", "how much budget is left", "how much can i still spend on food", "show my budgets", "budget remaining this month", "did i cross my budget",
     "food ka budget kitna bacha hai", "budget limit cross hua kya", "mera budget status", "budget me kitna bacha", "is mahine budget kaisa chal raha", "kitna aur kharch kar sakta hu", "petrol ka budget khatam hua kya",
     "बजट कितना बचा है", "बजट पार हो गया क्या", "मेरा बजट दिखाओ", "और कितना खर्च कर सकता हूं",
@@ -303,7 +309,7 @@ export const KB_CORPUS: Record<string, string[]> = {
   "kb:tax": ["how to save tax", "tax kaise bachaye", "80c kya hai", "टैक्स कैसे बचाएं", "ટેક્સ કેવી રીતે બચાવવો", "income tax saving tips", "tax kam kaise bhare", "tax bachane ka tarika"],
   "kb:emi_calc": ["how is emi calculated", "emi kaise calculate hoti hai", "emi formula", "ईएमआई कैसे निकलती है", "EMI કેવી રીતે ગણાય"],
   "kb:saving_habits": ["best saving habits", "paise bachane ki aadat", "pay yourself first", "how to stop impulse buying", "faltu kharcha kaise roke", "फालतू खर्च कैसे रोकें", "ખોટો ખર્ચ કેવી રીતે રોકવો"],
-  "kb:credit_card": ["how to use credit card wisely", "credit card ka sahi use", "credit card bill kaise bhare", "क्रेडिट कार्ड का सही इस्तेमाल", "ક્રેડિટ કાર્ડનો સાચો ઉપયોગ"],
+  "kb:credit_card": ["credit card kaise manage kare", "how to manage credit card bills", "credit card ka karz kaise chukaye", "credit card ki aadat kaise sudhare", "how to avoid credit card debt", "how to use credit card wisely", "credit card ka sahi use", "credit card bill kaise bhare", "क्रेडिट कार्ड का सही इस्तेमाल", "ક્રેડિટ કાર્ડનો સાચો ઉપયોગ"],
   "kb:retirement": ["how much to save for retirement", "retirement ke liye kitna bachaye", "retirement planning kaise kare", "रिटायरमेंट के लिए कितना बचाएं", "નિવૃત્તિ માટે કેટલું બચાવવું"],
   "kb:app_howto": ["how do i add an expense", "expense kaise add karu", "how to use budget pro", "app kaise use kare", "goal kaise banaye app me", "एक्सपेंस कैसे जोड़ें", "ખર્ચ કેવી રીતે ઉમેરવો"],
 };

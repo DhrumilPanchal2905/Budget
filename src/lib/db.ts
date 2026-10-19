@@ -12,7 +12,7 @@ mongoose.set("strictQuery", true);
 if (process.env.NODE_ENV === "production") mongoose.set("autoIndex", false);
 
 /** Bump when indexes in models.ts change → every new deployment creates the missing ones once, in the background. */
-const INDEX_VERSION = "2026-10-17.2";
+const INDEX_VERSION = "2026-10-19.1";
 
 export async function connectDB(): Promise<typeof mongoose> {
   if (cache.conn) return cache.conn;

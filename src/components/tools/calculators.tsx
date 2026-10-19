@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { emi, sipFutureValue } from "@/lib/finance-rules";
 import { CURRENCIES, currencyLocale } from "@/lib/currencies";
 
-const fmtFor = (cur: string) => (n: number) => {
+export const fmtFor = (cur: string) => (n: number) => {
   try {
     return new Intl.NumberFormat(currencyLocale(cur), { style: "currency", currency: cur, maximumFractionDigits: 0 }).format(Math.round(n));
   } catch {
@@ -13,7 +13,7 @@ const fmtFor = (cur: string) => (n: number) => {
   }
 };
 
-function Num({ label, value, onChange, suffix, step = 1, min = 0, max }: { label: string; value: number; onChange: (v: number) => void; suffix?: string; step?: number; min?: number; max?: number }) {
+export function Num({ label, value, onChange, suffix, step = 1, min = 0, max }: { label: string; value: number; onChange: (v: number) => void; suffix?: string; step?: number; min?: number; max?: number }) {
   return (
     <label className="block">
       <span className="text-xs font-medium text-muted">{label}</span>
@@ -34,7 +34,7 @@ function Num({ label, value, onChange, suffix, step = 1, min = 0, max }: { label
   );
 }
 
-function CurrencyPick({ cur, setCur }: { cur: string; setCur: (c: string) => void }) {
+export function CurrencyPick({ cur, setCur }: { cur: string; setCur: (c: string) => void }) {
   return (
     <label className="block">
       <span className="text-xs font-medium text-muted">Currency</span>
@@ -49,7 +49,7 @@ function CurrencyPick({ cur, setCur }: { cur: string; setCur: (c: string) => voi
   );
 }
 
-function Result({ items }: { items: [string, string, boolean?][] }) {
+export function Result({ items }: { items: [string, string, boolean?][] }) {
   return (
     <div className="grid gap-3 sm:grid-cols-3">
       {items.map(([k, v, strong]) => (
@@ -62,7 +62,7 @@ function Result({ items }: { items: [string, string, boolean?][] }) {
   );
 }
 
-const Cta = () => (
+export const Cta = () => (
   <p className="mt-6 rounded-xl border border-border bg-surface p-4 text-sm text-muted">
     Want this tracked automatically every month — with reminders and an AI that explains it in Hindi or Gujarati?{" "}
     <Link href="/register" className="font-medium text-primary hover:underline">

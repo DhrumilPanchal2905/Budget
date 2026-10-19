@@ -4,6 +4,8 @@ out
 .env
 .env.local
 .env.*.local
+.env*
+!.env.example
 .vercel
 *.tsbuildinfo
 .DS_Store

@@ -1,5 +1,6 @@
+import { invalidateUserCache } from "@/lib/auth";
 import { route, ok, parseBody } from "@/lib/api";
-import { AuditLog, Expense, Income, Notification, Session, User, Visit, isObjectId, oid, type UserDoc } from "@/lib/models";
+import { AuditLog, Expense, Income, Notification, Payment, Session, User, Visit, isObjectId, oid, type UserDoc } from "@/lib/models";
 import { placeLabel } from "@/lib/geo";
 import { adminUpdateUserSchema } from "@/lib/validation";
 import { hashPassword } from "@/lib/auth";
@@ -40,7 +41,7 @@ export const GET = route({ admin: true, perms: ["users.view"] }, async ({ params
       { $group: { _id: { y: { $year: "$date" }, m: { $month: "$date" } }, t: { $sum: "$amount" } } },
     ]);
 
-  const [usage, overall, incM, expM, notifications, activity, sessions, sessionList, visits] = await Promise.all([
+  const [usage, overall, incM, expM, notifications, activity, sessions, sessionList, visits, payments] = await Promise.all([
     getUsage(id),
     canFinance ? getOverall(id) : Promise.resolve(null),
     canFinance ? monthAgg(Income) : Promise.resolve([]),
@@ -52,6 +53,7 @@ export const GET = route({ admin: true, perms: ["users.view"] }, async ({ params
     Session.countDocuments({ userId, expiresAt: { $gt: new Date() } }),
     Session.find({ userId, expiresAt: { $gt: new Date() } }).sort({ lastSeenAt: -1 }).limit(10).select("createdAt lastSeenAt userAgent method country region city ip").lean(),
     Visit.find({ userId }).sort({ createdAt: -1 }).limit(15).select("createdAt path city region country countryCode device browser os").lean(),
+    Payment.find({ userId }).sort({ createdAt: -1 }).limit(20).select("plan amount status paidAt createdAt invoiceNo paymentId method periodEnd").lean(),
   ]);
 
   const toMap = (rows: { _id: { y: number; m: number }; t: number }[]) =>
@@ -73,6 +75,8 @@ export const GET = route({ admin: true, perms: ["users.view"] }, async ({ params
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       visits: visits.map((v: any) => ({ id: String(v._id), at: v.createdAt, path: v.path, place: placeLabel(v), code: v.countryCode ?? null, device: `${v.browser ?? ""} · ${v.os ?? ""}` })),
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    payments: payments.map((p: any) => ({ id: String(p._id), plan: p.plan, amount: p.amount / 100, status: p.status, at: p.paidAt ?? p.createdAt, invoiceNo: p.invoiceNo ?? null, paymentId: p.paymentId ?? null, method: p.method ?? null, periodEnd: p.periodEnd ?? null })),
     totals: overall?.totals ?? null,
     monthly: canFinance
       ? months.map((k) => ({ month: k, label: monthLabel(k), income: fromMinor(im.get(k) ?? 0), expense: fromMinor(em.get(k) ?? 0) }))
@@ -114,8 +118,11 @@ export const PATCH = route({ admin: true, perms: ["users.update"] }, async ({ re
     set.email = data.email;
     changes.push("email");
   }
-  if (data.plan !== undefined && data.plan !== target.plan) {
+  if (data.plan !== undefined && (data.plan !== target.plan || target.planExpiresAt)) {
+    // a plan given by an admin has no end date (replaces a bought plan's period)
     set.plan = data.plan;
+    set.planExpiresAt = null;
+    set.planSource = "admin";
     changes.push("plan");
   }
   if (data.role !== undefined && data.role !== target.role) {
@@ -163,11 +170,13 @@ export const PATCH = route({ admin: true, perms: ["users.update"] }, async ({ re
   if (!changes.length) throw Errors.badRequest("No changes to save.");
 
   const updated = await User.findByIdAndUpdate(target._id, { $set: set }, { new: true }).lean<UserDoc>();
+  invalidateUserCache(String(target._id));
   if (!updated) throw Errors.notFound("User");
 
   // Kill sessions when access is revoked or credentials reset.
   if (set.status === "disabled" || changes.includes("password")) {
     await Session.deleteMany({ userId: target._id });
+    invalidateUserCache(String(target._id));
     await publish([userChannel(String(target._id))], "session:revoked", {});
   } else {
     await publish([userChannel(String(target._id))], "profile:changed", {});

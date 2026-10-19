@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import useSWR from "swr";
-import { CheckCircle2, Database, Lock, Mail, Send, ShieldCheck, XCircle } from "lucide-react";
+import { CheckCircle2, CreditCard, Database, Gauge, Lock, Mail, Send, ShieldCheck, XCircle } from "lucide-react";
 import { RequirePerm } from "@/components/guard";
 import { useSession } from "@/components/session";
 import { useToast } from "@/components/toast";
@@ -16,6 +16,38 @@ interface Settings {
     envFallback: { user: string | null; hasPassword: boolean };
   };
   security: { encryptedApi: boolean; requireEncryption: boolean };
+  payments?: { mode: "live" | "test" | "off"; webhook: boolean; webhookUrl: string };
+  webSearch?: { provider: string | null };
+}
+
+/** Payments (Razorpay) and Angel's web search — what is set up. */
+function IntegrationsCard({ data }: { data: Settings }) {
+  const p = data.payments;
+  const w = data.webSearch;
+  return (
+    <Card>
+      <CardHeader title={<span className="flex items-center gap-2"><CreditCard className="h-4 w-4 text-muted" /> Payments & web answers</span>} />
+      <ul className="space-y-3 p-5 text-sm">
+        <li className="flex items-start gap-2">
+          {p?.mode === "off" ? <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-danger" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />}
+          <span>
+            <b>Razorpay:</b> {p?.mode === "live" ? "LIVE mode — real payments." : p?.mode === "test" ? "TEST mode — no real money (switch to rzp_live_ keys after KYC)." : "not set up. Add RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in Vercel env, then redeploy."}
+            {p && p.mode !== "off" && (
+              <span className="block text-xs text-muted">
+                Webhook {p.webhook ? "secret set ✓" : "secret missing ✗ (RAZORPAY_WEBHOOK_SECRET)"} · URL: <code className="select-all">{p.webhookUrl}</code> · events: payment.captured, payment.failed, order.paid, payment.refunded
+              </span>
+            )}
+          </span>
+        </li>
+        <li className="flex items-start gap-2">
+          {w?.provider ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-warning" />}
+          <span>
+            <b>Angel web answers:</b> {w?.provider ? `${w.provider} (Google-quality results).` : "free sources (Wikipedia + DuckDuckGo). For Google results add SERPER_API_KEY (serper.dev, 2,500 free searches)."}
+          </span>
+        </li>
+      </ul>
+    </Card>
+  );
 }
 
 function EmailCard({ data, onSaved }: { data: Settings; onSaved: (d: Settings) => void }) {
@@ -177,11 +209,61 @@ function SecurityCard({ data }: { data: Settings }) {
   );
 }
 
+/** Where the time goes: server region and one database round trip. */
+function SpeedCard() {
+  const [r, setR] = useState<{ region: string; connectMs: number; dbMs: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/health", { cache: "no-store" });
+      setR(await res.json());
+    } catch {
+      setR(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+  useEffect(() => {
+    void run();
+  }, []);
+  const slow = r ? r.dbMs > 25 : false;
+  return (
+    <Card>
+      <CardHeader
+        title={<span className="flex items-center gap-2"><Gauge className="h-4 w-4 text-muted" /> Speed check</span>}
+        subtitle="One database round trip from the server. Same-region setups answer in under 5 ms."
+        action={<Button size="sm" variant="secondary" onClick={run} loading={busy}>Test again</Button>}
+      />
+      <div className="space-y-3 p-5 text-sm">
+        {!r ? (
+          <Skeleton className="h-16" />
+        ) : (
+          <>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-xl border border-border bg-surface-2/60 p-3"><p className="text-xs text-muted">Server region</p><p className="mt-1 font-semibold">{r.region}</p></div>
+              <div className="rounded-xl border border-border bg-surface-2/60 p-3"><p className="text-xs text-muted">Database round trip</p><p className={`tabular mt-1 font-semibold ${slow ? "text-danger" : "text-success"}`}>{r.dbMs} ms</p></div>
+              <div className="rounded-xl border border-border bg-surface-2/60 p-3"><p className="text-xs text-muted">Connect (cold start)</p><p className="tabular mt-1 font-semibold">{r.connectMs} ms</p></div>
+            </div>
+            {slow ? (
+              <p className="rounded-lg border border-danger/40 bg-danger/10 p-3">
+                <b>Database is far from the server.</b> Every page runs 10–25 queries, so each {r.dbMs} ms trip adds up to seconds. Fix: in MongoDB Atlas, create / move the cluster to <b>AWS Mumbai (ap-south-1)</b> — the server runs in <b>{r.region}</b> (vercel.json → regions). Or set vercel.json &quot;regions&quot; to the region closest to your Atlas cluster.
+              </p>
+            ) : (
+              <p className="flex items-center gap-1.5 text-success"><CheckCircle2 className="h-4 w-4" /> Server and database are close together — that&apos;s the fastest setup.</p>
+            )}
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function Inner() {
   const { data, error, isLoading, mutate } = useSWR<Settings>("/api/admin/settings");
   return (
     <>
-      <PageHeader title="System settings" subtitle="Email sender, security and maintenance." />
+      <PageHeader title="System settings" subtitle="Email sender, payments, web answers, speed, security and maintenance." />
       {error ? (
         <ErrorState message={error.message} onRetry={() => mutate()} />
       ) : isLoading || !data ? (
@@ -189,6 +271,8 @@ function Inner() {
       ) : (
         <div className="space-y-4">
           <EmailCard data={data} onSaved={(d) => void mutate(d, { revalidate: false })} />
+          <IntegrationsCard data={data} />
+          <SpeedCard />
           <SecurityCard data={data} />
         </div>
       )}

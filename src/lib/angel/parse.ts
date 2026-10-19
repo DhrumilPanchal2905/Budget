@@ -325,6 +325,9 @@ const WEAK_RULES = new Set<Intent>(["unknown", "overview", "expense", "income", 
 /** Intents the model may NOT invent on its own (they need specific evidence such as an amount). */
 const NEEDS_AMOUNT = new Set<string>(["add_expense", "add_income", "goal_contribute", "goal_withdraw", "create_debt", "set_budget", "edit_last", "afford"]);
 
+/** second-person words ("you", "tum", "aap", "તમે" …) */
+const YOU_RE = /^(you|your|tum|tumhe|tumko|tumhara|tumhari|aap|aapko|aapka|aapki|tu|tera|teri|tame|tamne|tamaru|taru|tane|तुम|तुम्हें|तुम्हारा|आप|आपको|आपका|तू|तेरा|તમે|તમને|તમારું|તું|તારું)$/;
+
 function decide(
   rule: Intent,
   mlIn: Prediction,
@@ -345,6 +348,8 @@ function decide(
   // 1. Rules found nothing → trust the model if it is reasonably sure (but never on numbers alone, e.g. "1").
   if (rule === "unknown") {
     if (!x.tokens.some((t) => /\p{L}/u.test(t))) return { intent: "unknown", kbTopic: null };
+    // "taj mahal kisne banaya" looks like "who made you" — but it's about something else (→ web search)
+    if (mlIntent === "identity" && x.contentWords.some((w) => !YOU_RE.test(w))) return { intent: "unknown", kbTopic: null };
     if (isKb && ml.score >= 0.3) return { intent: "kb", kbTopic: mlIntent.slice(3) };
     if (!isKb && allowedByEvidence && ml.score >= 0.3 && mlIntent !== "unknown") return { intent: mlIntent as Intent, kbTopic: null };
     return { intent: "unknown", kbTopic: null };
@@ -444,7 +449,9 @@ function classify(x: ClassifyInput): Intent {
   }
 
   // ---------- small talk ----------
-  if (has("identity")) return "identity";
+  // "kisne banaya" alone = who made YOU; "taj mahal kisne banaya" is about something else (→ web)
+  const youWord = tokens.some((t) => YOU_RE.test(t));
+  if (has("identity") && (youWord || x.contentWords.length === 0 || /\b(who are you|what are you|your name)\b/.test(joined))) return "identity";
   if (has("help") && !amount && !has("savings") && !has("advice")) return "help";
   if (has("greet") && short && !has("self") && !amount && !has("why")) return "greet";
   if (has("ack") && short && !amount && !topic) return "ack";
@@ -461,7 +468,7 @@ function classify(x: ClassifyInput): Intent {
   if (has("visitorWord") && !moneyTopicEarly) return "visitors";
   if ((has("most") || has("largest")) && (has("whoWord") || tokens.some((t) => /^(users|यूज़र्स|यूजर्स|યુઝર્સ)$/.test(t)))) return "top_users";
   if (!moneyTopicEarly && ((anyUserWord && (!!x.planId || has("userFilter") || has("adminWord"))) || (has("adminWord") && (has("question") || has("whoWord"))))) return "users_query";
-  if (has("profile") && !wantsAdd && !amount && !has("advice") && !has("balance")) return "profile";
+  if (has("profile") && !wantsAdd && !amount && !has("advice") && !has("balance") && !has("debt") && !has("goal")) return "profile";
   if (has("plan") && (has("question") || has("self")) && !has("savings") && !has("expense") && !amount && !has("changeVerb")) return "profile";
 
   // ---------- admin queries ----------
@@ -494,6 +501,8 @@ function classify(x: ClassifyInput): Intent {
   const literalBalance = /(^| )(balance|belens|balans|बैलेंस|બેલેન્સ)( |$)/.test(joined);
   if (has("balance") && !literalBalance && has("savings")) return "savings";
   if (has("balance") && !literalBalance && has("expense")) return "expense";
+  // "kitne paise aaye" (money came in) is income, not balance
+  if (has("balance") && !literalBalance && has("income") && !has("self")) return "income";
   if (has("balance")) return "balance";
   if (has("savings")) return "savings";
   if (has("expense") || x.exp) return "expense";

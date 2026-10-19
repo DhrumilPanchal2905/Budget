@@ -5,6 +5,7 @@ import { Session, User, type UserDoc } from "./models";
 import { SECURE_COOKIES, SESSION_ABSOLUTE_DAYS, SESSION_COOKIE, SESSION_IDLE_DAYS, SHORT_SESSION_HOURS } from "./env";
 import { effectivePermissions, type Permission } from "./permissions";
 import { geoFromHeaders } from "./geo";
+import { effectivePlanId } from "./plans";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -109,17 +110,49 @@ export interface AuthState {
   sessionId: string;
 }
 
+// Tiny per-instance cache: a page load fires several API calls at once (me, dashboard, notifications, quota …);
+// they share ONE database lookup. Entries live 3 seconds, so revoked sessions stop working almost immediately.
+const SESSION_CACHE_MS = 3000;
+const sessionCache = new Map<string, { at: number; p: Promise<AuthState | null>; userId?: string }>();
+
+/** Forget cached sessions of a user (after a plan / role / status change in this instance). */
+export function invalidateUserCache(userId: string) {
+  for (const [k, v] of sessionCache) if (v.userId === userId) sessionCache.delete(k);
+}
+
 /** Resolve a raw session token to the active user. Returns null for invalid/expired/disabled. */
 export async function resolveSession(token: string | undefined | null): Promise<AuthState | null> {
   if (!token || token.length > 200) return null;
+  const th = hashToken(token);
+  const now = Date.now();
+  const hit = sessionCache.get(th);
+  let p: Promise<AuthState | null>;
+  if (hit && now - hit.at < SESSION_CACHE_MS) p = hit.p;
+  else {
+    p = resolveFresh(th);
+    const entry: { at: number; p: Promise<AuthState | null>; userId?: string } = { at: now, p };
+    sessionCache.set(th, entry);
+    if (sessionCache.size > 1000) sessionCache.delete(sessionCache.keys().next().value as string);
+    p.then(
+      (st) => (st ? (entry.userId = String(st.user._id)) : sessionCache.delete(th)),
+      () => sessionCache.delete(th),
+    );
+  }
+  const st = await p;
+  // every request gets its own copy (routes may change fields on it)
+  return st ? { ...st, user: { ...st.user }, perms: [...st.perms] } : null;
+}
+
+async function resolveFresh(tokenHash: string): Promise<AuthState | null> {
   const now = new Date();
-  const session = await Session.findOne({ tokenHash: hashToken(token), expiresAt: { $gt: now } }).lean<{
-    _id: unknown;
-    userId: unknown;
-    lastSeenAt?: Date;
-    createdAt: Date;
-    remember?: boolean;
-  }>();
+  // one round trip: the session and its user together
+  const [session] = await Session.aggregate<{ _id: unknown; userId: unknown; lastSeenAt?: Date; createdAt: Date; remember?: boolean; u: UserDoc[] }>([
+    { $match: { tokenHash, expiresAt: { $gt: now } } },
+    { $limit: 1 },
+    // (localField + pipeline needs MongoDB 5.0+; Atlas runs 6/7/8)
+    { $lookup: { from: "users", localField: "userId", foreignField: "_id", as: "u", pipeline: [{ $project: { passwordHash: 0 } }] } },
+    { $project: { tokenHash: 0, ip: 0, userAgent: 0 } },
+  ]);
   if (!session) return null;
 
   // Absolute lifetime cap.
@@ -128,7 +161,7 @@ export async function resolveSession(token: string | undefined | null): Promise<
     return null;
   }
 
-  const user = await User.findById(session.userId).lean<UserDoc>();
+  const user = session.u?.[0];
   if (!user || user.status !== "active") {
     await Session.deleteOne({ _id: session._id });
     return null;
@@ -140,12 +173,9 @@ export async function resolveSession(token: string | undefined | null): Promise<
     user.plan = "unlimited";
   }
 
-  // Sliding idle expiry — refresh at most every 15 minutes to keep writes cheap.
+  // Sliding idle expiry — refresh at most every 15 minutes to keep writes cheap (never blocks the request).
   if (!session.lastSeenAt || now.getTime() - new Date(session.lastSeenAt).getTime() > 15 * 60 * 1000) {
-    await Session.updateOne(
-      { _id: session._id },
-      { $set: { lastSeenAt: now, expiresAt: new Date(now.getTime() + idleMs(Boolean(session.remember))) } },
-    );
+    void Session.updateOne({ _id: session._id }, { $set: { lastSeenAt: now, expiresAt: new Date(now.getTime() + idleMs(Boolean(session.remember))) } }).catch(() => null);
   }
 
   return { user, perms: effectivePermissions(user.role, user.permissions ?? []), sessionId: String(session._id) };
@@ -154,6 +184,7 @@ export async function resolveSession(token: string | undefined | null): Promise<
 export async function destroySession(token: string | undefined | null) {
   if (!token) return;
   await Session.deleteOne({ tokenHash: hashToken(token) });
+  sessionCache.delete(hashToken(token)); // after the delete, so a parallel request can't re-cache it
 }
 
 export function publicUser(user: UserDoc, perms: Permission[]) {
@@ -162,7 +193,9 @@ export function publicUser(user: UserDoc, perms: Permission[]) {
     email: user.email,
     name: user.name,
     role: user.role,
-    plan: user.plan,
+    plan: effectivePlanId(user),
+    planExpiresAt: user.planExpiresAt && effectivePlanId(user) !== "free" ? new Date(user.planExpiresAt).toISOString() : null,
+    planSource: user.planSource ?? null,
     status: user.status,
     currency: user.currency || "INR",
     theme: user.theme || "midnight",

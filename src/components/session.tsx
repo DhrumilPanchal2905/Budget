@@ -45,6 +45,11 @@ export function SessionProvider({ initialUser, children }: { initialUser: Public
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 
+/** Same as useSession, but returns null outside the signed-in app (public pages). */
+export function useSessionOptional(): SessionCtx | null {
+  return useContext(SessionContext);
+}
+
 export function useSession(): SessionCtx {
   const ctx = useContext(SessionContext);
   if (!ctx) throw new Error("useSession must be used inside SessionProvider");

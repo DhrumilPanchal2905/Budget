@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/seo";
 
-const PRIVATE = ["/api/", "/dashboard", "/income", "/expenses", "/budgets", "/debts", "/goals", "/analytics", "/insights", "/notifications", "/settings", "/plan", "/admin", "/forgot-password"];
+const PRIVATE = ["/api/", "/plan/invoice", "/dashboard", "/income", "/expenses", "/budgets", "/debts", "/goals", "/analytics", "/insights", "/notifications", "/settings", "/plan", "/admin", "/forgot-password"];
 
 // Search engines AND AI answer engines (ChatGPT, Claude, Perplexity, Gemini, Copilot…) may read the public
 // pages, so Budget Pro can be recommended when people ask an AI for a budget app. Private app pages stay blocked.

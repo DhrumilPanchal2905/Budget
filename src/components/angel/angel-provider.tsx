@@ -4,14 +4,14 @@
 // chat state and history actions. The heavy chat UI is loaded only when Angel is first opened.
 import dynamic from "next/dynamic";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
-import { api } from "@/lib/client";
+import { api, ApiClientError } from "@/lib/client";
 import { afterWake, isNameOnly, isSleepPhrase, isWakePhrase, startsWithName, stripWake } from "@/lib/angel/wake";
 import { forSpeech } from "@/lib/angel/i18n";
-import type { AngelLangPref, AngelMessageDTO, ActionView } from "@/lib/angel/types";
-import { useSession } from "../session";
+import type { AngelLangPref, AngelMessageDTO, AngelQuotaDTO, ActionView, Card } from "@/lib/angel/types";
+import { useSessionOptional } from "../session";
 import { useToast } from "../toast";
 import { AngelOrb, type OrbState } from "./orb";
-import { captureUtterance, chime, listen, speak, speechRecognitionSupported, startMicMeter, type Heard, type MicMeter } from "./voice";
+import { captureUtterance, chime, listen, setPreferredVoice, speak, speechRecognitionSupported, startMicMeter, type Heard, type MicMeter } from "./voice";
 
 const AngelPanel = dynamic(() => import("./angel-panel").then((m) => m.AngelPanel), { ssr: false });
 
@@ -23,8 +23,10 @@ export interface AngelSettings {
   speakReplies: boolean;
   /** how long Angel waits after you stop talking before sending (ms) */
   pauseMs: number;
+  /** chosen speaking voice per reply language (browser voice name); empty = Angel picks the most natural one */
+  voices: Partial<Record<"en" | "hi" | "gu" | "hn", string>>;
 }
-const DEFAULTS: AngelSettings = { wake: false, voiceLang: "hi-IN", replyLang: "auto", speakReplies: true, pauseMs: 1200 };
+const DEFAULTS: AngelSettings = { wake: false, voiceLang: "hi-IN", replyLang: "auto", speakReplies: true, pauseMs: 1200, voices: {} };
 const KEY = "angel-settings-v1";
 
 function loadSettings(): AngelSettings {
@@ -39,6 +41,12 @@ function loadSettings(): AngelSettings {
 
 interface AngelCtx {
   eligible: boolean;
+  /** visitor without an account (public pages): no history, no actions, smaller limit */
+  guest: boolean;
+  firstName: string;
+  /** Angel credits in the current window (null = not loaded yet) */
+  quota: AngelQuotaDTO | null;
+  refreshQuota: () => void;
   open: boolean;
   setOpen: (v: boolean) => void;
   mode: OrbState;
@@ -76,10 +84,16 @@ const GREETING: Record<string, string> = { "hi-IN": "जी, बोलिए", "
 const BYE: Record<string, string> = { "hi-IN": "ठीक है, बाय", "en-IN": "Okay, bye", "gu-IN": "બરાબર, આવજો" };
 const ttsLang = (v: VoiceLang) => (v === "hi-IN" ? "hi" : v === "gu-IN" ? "gu" : "en");
 
-export function AngelProvider({ children }: { children: ReactNode }) {
-  const { user } = useSession();
+const GUEST_KEY = "angel-guest-chat-v1";
+
+export function AngelProvider({ children, guest = false }: { children: ReactNode; guest?: boolean }) {
+  const session = useSessionOptional();
+  const user = session?.user ?? null;
   const toast = useToast();
-  const eligible = user.role === "admin" || user.plan === "unlimited";
+  // Angel is part of every plan now (limited plans have credits); visitors get a guest Angel.
+  const eligible = guest || !!user;
+  const firstName = user ? user.name.split(" ")[0] : "";
+  const [quota, setQuota] = useState<AngelQuotaDTO | null>(null);
 
   const [open, setOpenState] = useState(false);
   const [everOpened, setEverOpened] = useState(false);
@@ -109,11 +123,38 @@ export function AngelProvider({ children }: { children: ReactNode }) {
   convRef.current = conversationId;
 
   useEffect(() => {
-    setSettings(loadSettings());
+    const st = loadSettings();
+    setSettings(st);
+    for (const [l, n] of Object.entries(st.voices ?? {})) setPreferredVoice(l, n || null);
     setVoiceSupported(speechRecognitionSupported());
-  }, []);
+    if (guest) {
+      try {
+        const raw = sessionStorage.getItem(GUEST_KEY);
+        if (raw) setMessages(JSON.parse(raw));
+      } catch {
+        /* storage blocked */
+      }
+    }
+  }, [guest]);
+
+  // guests: keep the chat for this browser tab
+  useEffect(() => {
+    if (!guest) return;
+    try {
+      sessionStorage.setItem(GUEST_KEY, JSON.stringify(messages.filter((m) => !m.id.startsWith("tmp-")).slice(-40)));
+    } catch {
+      /* ignore */
+    }
+  }, [guest, messages]);
+
+  const refreshQuota = useCallback(() => {
+    void api<{ quota: AngelQuotaDTO }>(guest ? "/api/angel/guest" : "/api/angel/quota")
+      .then((r) => setQuota(r.data.quota))
+      .catch(() => null);
+  }, [guest]);
 
   const updateSettings = useCallback((patch: Partial<AngelSettings>) => {
+    if (patch.voices) for (const [l, n] of Object.entries(patch.voices)) setPreferredVoice(l, n || null);
     setSettings((s) => {
       const next = { ...s, ...patch };
       try {
@@ -125,10 +166,16 @@ export function AngelProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const setOpen = useCallback((v: boolean) => {
-    setOpenState(v);
-    if (v) setEverOpened(true);
-  }, []);
+  const setOpen = useCallback(
+    (v: boolean) => {
+      setOpenState(v);
+      if (v) {
+        setEverOpened(true);
+        refreshQuota();
+      }
+    },
+    [refreshQuota],
+  );
 
   // ---------- level animation loop (mic while listening, synthetic while speaking) ----------
   const modeRef = useRef(mode);
@@ -256,34 +303,67 @@ export function AngelProvider({ children }: { children: ReactNode }) {
       const tempId = `tmp-${Date.now()}`;
       setMessages((ms) => [...ms, { id: tempId, role: "user", text, lang: "en", source, createdAt: new Date().toISOString() }]);
       try {
-        const { data } = await api<{ conversation: { id: string }; messages: AngelMessageDTO[]; updated: { id: string; action: ActionView | null } | null; speak: string; lang: string }>("/api/angel/chat", {
-          method: "POST",
-          body: { message: text, conversationId: convRef.current, source, lang: settingsRef.current.replyLang, ...(alts.length ? { alts: alts.slice(0, 3) } : {}) },
-        });
-        setConversationId(data.conversation.id);
-        convRef.current = data.conversation.id;
-        setMessages((ms) => [...ms.filter((m) => m.id !== tempId), ...data.messages]);
-        applyUpdated(data.updated);
-        setHistoryVersion((v) => v + 1);
+        let speakText = "";
+        let speakLang = "en";
+        if (guest) {
+          const { data } = await api<{ text: string; speak: string; lang: string; cards: Card[]; suggestions: string[]; quota: AngelQuotaDTO }>("/api/angel/guest", {
+            method: "POST",
+            body: { message: text, source, lang: settingsRef.current.replyLang, ...(alts.length ? { alts: alts.slice(0, 4) } : {}) },
+          });
+          const now = new Date().toISOString();
+          setMessages((ms) => [
+            ...ms.map((m) => (m.id === tempId ? { ...m, id: `u-${Date.now()}` } : m)),
+            { id: `a-${Date.now()}`, role: "angel", text: data.text, lang: data.lang as AngelMessageDTO["lang"], source: "system", cards: data.cards?.length ? data.cards : undefined, suggestions: data.suggestions?.length ? data.suggestions : undefined, createdAt: now },
+          ]);
+          setQuota(data.quota);
+          speakText = data.speak;
+          speakLang = data.lang;
+        } else {
+          const { data } = await api<{ conversation: { id: string }; messages: AngelMessageDTO[]; updated: { id: string; action: ActionView | null } | null; speak: string; lang: string; quota?: AngelQuotaDTO }>("/api/angel/chat", {
+            method: "POST",
+            body: { message: text, conversationId: convRef.current, source, lang: settingsRef.current.replyLang, ...(alts.length ? { alts: alts.slice(0, 4) } : {}) },
+          });
+          setConversationId(data.conversation.id);
+          convRef.current = data.conversation.id;
+          setMessages((ms) => [...ms.filter((m) => m.id !== tempId), ...data.messages]);
+          applyUpdated(data.updated);
+          setHistoryVersion((v) => v + 1);
+          if (data.quota) setQuota(data.quota);
+          speakText = data.speak;
+          speakLang = data.lang;
+        }
         sendingRef.current = false;
         setSending(false);
         if (sessionRef.current) {
-          await speakThen(data.speak, data.lang);
+          await speakThen(speakText, speakLang);
           if (sessionRef.current) void startCommandListening();
           else setMode("idle");
         } else setMode("idle");
       } catch (err) {
         sendingRef.current = false;
         setSending(false);
+        const e = err as ApiClientError;
+        const limited = e.status === 429 && e.errors?.quota === "angel";
+        const cards: Card[] | undefined = limited
+          ? [
+              guest
+                ? { type: "cta", title: "Get more Angel", text: "A free account gives you more credits and answers from your own budget.", actions: [{ label: "Create free account", href: "/register", primary: true }, { label: "Sign in", href: "/login" }] }
+                : { type: "cta", title: "Need more Angel?", text: "Plus, Pro and Unlimited give you more credits — Unlimited has no limit at all.", actions: [{ label: "See plans", href: "/plan", primary: true }] },
+            ]
+          : undefined;
+        if (limited) {
+          setQuota((q) => (q ? { ...q, remaining: 0, used: q.limit ?? q.used, resetAt: e.errors?.resetAt || q.resetAt } : q));
+          refreshQuota();
+        }
         setMessages((ms) => [
-          ...ms,
-          { id: `err-${Date.now()}`, role: "angel", text: (err as Error).message || "Something went wrong. Please try again.", lang: "en", source: "system", createdAt: new Date().toISOString() },
+          ...ms.filter((m) => !(limited && m.id === tempId)),
+          { id: `err-${Date.now()}`, role: "angel", text: e.message || "Something went wrong. Please try again.", lang: "en", source: "system", cards, createdAt: new Date().toISOString() },
         ]);
         setMode("idle");
         if (sessionRef.current) endVoice();
       }
     },
-    [speakThen, startCommandListening, endVoice],
+    [speakThen, startCommandListening, endVoice, guest, refreshQuota],
   );
 
   handleFinalRef.current = (t: string, alts: string[]) => {
@@ -401,6 +481,7 @@ export function AngelProvider({ children }: { children: ReactNode }) {
 
   // ---------- history & actions ----------
   const decide = useCallback(async (messageId: string, decision: "confirm" | "cancel" | "undo") => {
+    if (guest) return;
     try {
       const { data } = await api<{ updated: { id: string; action: ActionView | null }; message: AngelMessageDTO; speak: string; lang: string }>(`/api/angel/messages/${messageId}/action`, { method: "POST", body: { decision } });
       applyUpdated(data.updated);
@@ -413,7 +494,7 @@ export function AngelProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       toast.error("Angel", (err as Error).message);
     }
-  }, [speakThen, startCommandListening, toast]);
+  }, [speakThen, startCommandListening, toast, guest]);
 
   const openConversation = useCallback(async (id: string) => {
     try {
@@ -431,7 +512,7 @@ export function AngelProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const deleteMessage = useCallback(async (id: string) => {
-    if (id.startsWith("tmp-") || id.startsWith("err-")) {
+    if (guest || id.startsWith("tmp-") || id.startsWith("err-")) {
       setMessages((ms) => ms.filter((m) => m.id !== id));
       return;
     }
@@ -443,7 +524,7 @@ export function AngelProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       toast.error("Could not delete", (err as Error).message);
     }
-  }, [toast]);
+  }, [toast, guest]);
 
   const speakText = useCallback((text: string, lang: string) => {
     stopTts();
@@ -458,6 +539,10 @@ export function AngelProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AngelCtx>(
     () => ({
       eligible,
+      guest,
+      firstName,
+      quota,
+      refreshQuota,
       open,
       setOpen,
       mode,
@@ -481,7 +566,7 @@ export function AngelProvider({ children }: { children: ReactNode }) {
       historyVersion,
       bumpHistory: () => setHistoryVersion((v) => v + 1),
     }),
-    [eligible, open, setOpen, mode, transcript, voiceSession, voiceSupported, messages, conversationId, sending, settings, updateSettings, send, activate, endVoice, decide, openConversation, newChat, deleteMessage, speakText, historyVersion],
+    [eligible, guest, firstName, quota, refreshQuota, open, setOpen, mode, transcript, voiceSession, voiceSupported, messages, conversationId, sending, settings, updateSettings, send, activate, endVoice, decide, openConversation, newChat, deleteMessage, speakText, historyVersion],
   );
 
   return (
@@ -499,16 +584,23 @@ export function AngelProvider({ children }: { children: ReactNode }) {
 
 /** Floating live orb — tap to open Angel. Shows a small "ear" when it is listening for “Angel active”. */
 function AngelLauncher() {
-  const { setOpen, mode, levelRef, settings } = useAngel();
+  const { setOpen, mode, levelRef, settings, guest } = useAngel();
   return (
     <button
       type="button"
       onClick={() => setOpen(true)}
       aria-label="Open Angel AI assistant"
       title={settings.wake ? "Angel — say “Angel active”" : "Angel AI"}
-      className="group fixed bottom-[76px] right-4 mb-[env(safe-area-inset-bottom)] lg:mb-0 z-[44] flex h-14 w-14 items-center justify-center rounded-full bg-black/60 shadow-[0_8px_30px_-6px_rgb(var(--primary)/0.55)] ring-1 ring-white/10 backdrop-blur transition-transform hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary lg:bottom-6 lg:right-6"
+      className={`group fixed ${guest ? "bottom-4" : "bottom-[76px]"} right-4 z-[44] mb-[env(safe-area-inset-bottom)] flex rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary lg:bottom-6 lg:right-6 lg:mb-0`}
     >
-      <AngelOrb size={56} state={mode === "wake" ? "wake" : "idle"} levelRef={levelRef} halo />
+      {guest && (
+        <span className="pointer-events-none absolute right-[64px] top-1/2 hidden -translate-y-1/2 whitespace-nowrap rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium shadow-lg sm:block">
+          Ask Angel AI ✨
+        </span>
+      )}
+      <span className="flex h-14 w-14 items-center justify-center rounded-full bg-black/60 shadow-[0_8px_30px_-6px_rgb(var(--primary)/0.55)] ring-1 ring-white/10 backdrop-blur transition-transform group-hover:scale-105">
+        <AngelOrb size={56} state={mode === "wake" ? "wake" : "idle"} levelRef={levelRef} halo />
+      </span>
       {mode === "wake" && <span className="absolute right-0.5 top-0.5 h-2.5 w-2.5 rounded-full bg-success ring-2 ring-bg" aria-hidden />}
     </button>
   );

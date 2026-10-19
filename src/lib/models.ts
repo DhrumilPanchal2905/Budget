@@ -11,6 +11,12 @@ const userSchema = new Schema(
     role: { type: String, enum: ["user", "admin"], default: "user", index: true },
     permissions: { type: [String], default: [] },
     plan: { type: String, enum: ["free", "plus", "pro", "unlimited"], default: "free", index: true },
+    /** end of a BOUGHT plan period (null/absent = no end, e.g. Free or a plan given by an admin) */
+    planExpiresAt: { type: Date, default: null },
+    /** how the current plan was set: "paid" (Razorpay), "admin" (given by an admin) */
+    planSource: { type: String, enum: ["paid", "admin", "system"] },
+    /** set when the "plan ends in 3 days" reminder was sent for the current period */
+    planReminderAt: { type: Date },
     status: { type: String, enum: ["active", "disabled"], default: "active", index: true },
     currency: { type: String, default: "INR", maxlength: 3 },
     theme: { type: String, default: "midnight", maxlength: 20 },
@@ -318,6 +324,52 @@ const emailOtpSchema = new Schema({
 emailOtpSchema.index({ email: 1, purpose: 1 }, { unique: true });
 emailOtpSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
+// ---------- Payments (Razorpay). One document per checkout order; status only moves forward. ----------
+const paymentSchema = new Schema(
+  {
+    userId: { type: ObjectId, ref: "User", required: true, index: true },
+    email: { type: String, maxlength: 254 },
+    name: { type: String, maxlength: 80 },
+    plan: { type: String, enum: ["plus", "pro", "unlimited"], required: true },
+    amount: { type: Number, required: true }, // paise
+    currency: { type: String, default: "INR", maxlength: 3 },
+    provider: { type: String, default: "razorpay" },
+    orderId: { type: String, required: true, unique: true, maxlength: 60 },
+    paymentId: { type: String, maxlength: 60 },
+    status: { type: String, enum: ["created", "paid", "failed", "refunded"], default: "created", index: true },
+    method: { type: String, maxlength: 30 }, // upi / card / netbanking / wallet
+    /** the plan period this payment bought */
+    periodStart: { type: Date },
+    periodEnd: { type: Date },
+    /** bonus days carried over from the previous plan on an upgrade */
+    creditDays: { type: Number, default: 0 },
+    failureReason: { type: String, maxlength: 300 },
+    paidAt: { type: Date },
+    verifiedBy: { type: String, enum: ["checkout", "webhook", "sync"] },
+    receipt: { type: String, maxlength: 40 },
+    invoiceNo: { type: String, maxlength: 40 },
+    /** applying the paid plan to the account: "applying" (in progress / retry) → "applied" */
+    applyState: { type: String, enum: ["applying", "applied"] },
+    applyStartedAt: { type: Date },
+    ip: { type: String, maxlength: 64 },
+  },
+  { timestamps: true },
+);
+paymentSchema.index({ createdAt: -1 });
+paymentSchema.index({ status: 1, paidAt: -1 });
+paymentSchema.index({ paymentId: 1 }, { unique: true, partialFilterExpression: { paymentId: { $type: "string" } } });
+paymentSchema.index({ invoiceNo: 1 }, { unique: true, partialFilterExpression: { invoiceNo: { $type: "string" } } });
+
+// ---------- Angel AI usage windows (per user, or per guest device/IP) ----------
+const angelUsageSchema = new Schema({
+  key: { type: String, required: true, unique: true, maxlength: 120 }, // "u:<userId>" | "g:<hash>" | "gi:<ipHash>"
+  used: { type: Number, default: 0 },
+  windowStart: { type: Date },
+  resetAt: { type: Date },
+  expiresAt: { type: Date }, // TTL cleanup
+});
+angelUsageSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
 // Models are typed loosely (Model<any>) on purpose: every write goes through zod validation
 // in lib/validation.ts first, and loose typing keeps hot-reload + serverless re-registration simple.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -346,6 +398,8 @@ export const GoalContribution = getModel("GoalContribution", goalContributionSch
 export const Visit = getModel("Visit", visitSchema, "visits");
 export const AppSetting = getModel("AppSetting", appSettingSchema, "appsettings");
 export const EmailOtp = getModel("EmailOtp", emailOtpSchema, "emailotps");
+export const Payment = getModel("Payment", paymentSchema, "payments");
+export const AngelUsage = getModel("AngelUsage", angelUsageSchema, "angelusages");
 
 export interface UserDoc {
   _id: Types.ObjectId;
@@ -354,6 +408,9 @@ export interface UserDoc {
   role: "user" | "admin";
   permissions: string[];
   plan: "free" | "plus" | "pro" | "unlimited";
+  planExpiresAt?: Date | null;
+  planSource?: "paid" | "admin" | "system";
+  planReminderAt?: Date;
   status: "active" | "disabled";
   currency: string;
   theme: string;
@@ -387,10 +444,12 @@ export const COLLECTIONS = {
   visits: Visit,
   emailotps: EmailOtp,
   appsettings: AppSetting,
+  payments: Payment,
+  angelusages: AngelUsage,
 } as const;
 
 /** Every model (for index creation). */
-export const ALL_MODELS = { User, Session, Income, Expense, Debt, Goal, Notification, AuditLog, PushSubscription, RealtimeEvent, RateLimit, Passkey, WebAuthnChallenge, AngelConversation, AngelMessage, Budget, GoalContribution, Visit, AppSetting, EmailOtp };
+export const ALL_MODELS = { User, Session, Income, Expense, Debt, Goal, Notification, AuditLog, PushSubscription, RealtimeEvent, RateLimit, Passkey, WebAuthnChallenge, AngelConversation, AngelMessage, Budget, GoalContribution, Visit, AppSetting, EmailOtp, Payment, AngelUsage };
 
 export function isObjectId(id: unknown): id is string {
   return typeof id === "string" && /^[a-f0-9]{24}$/i.test(id) && mongoose.isValidObjectId(id);

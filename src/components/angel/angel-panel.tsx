@@ -2,15 +2,15 @@
 
 // Angel AI — the conversation panel: live orb + voice stage, chat, history (with delete) and settings.
 import { forwardRef, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { ArrowUp, Check, Copy, History, Mic, MicOff, MessageSquarePlus, Settings2, Trash2, Undo2, Volume2, X } from "lucide-react";
+import Link from "next/link";
+import { ArrowUp, Check, Copy, ExternalLink, History, Mic, MicOff, MessageSquarePlus, Play, Settings2, Sparkles, Trash2, Undo2, Volume2, X } from "lucide-react";
 import { api, timeAgo } from "@/lib/client";
 import type { AngelMessageDTO, Card, ConversationDTO } from "@/lib/angel/types";
-import { useSession } from "../session";
 import { useToast } from "../toast";
 import { Button, ConfirmDialog, cn } from "../ui";
 import { AngelOrb } from "./orb";
 import { useAngel, type VoiceLang } from "./angel-provider";
-import { canSpeak } from "./voice";
+import { canSpeak, listVoices, speak } from "./voice";
 
 const STATUS: Record<string, string> = {
   idle: "Ready",
@@ -56,9 +56,11 @@ export function AngelPanel() {
         <IconBtn label="New chat" onClick={() => { a.newChat(); setView("chat"); }}>
           <MessageSquarePlus className="h-4 w-4" />
         </IconBtn>
-        <IconBtn label="Chat history" active={view === "history"} onClick={() => setView(view === "history" ? "chat" : "history")}>
-          <History className="h-4 w-4" />
-        </IconBtn>
+        {!a.guest && (
+          <IconBtn label="Chat history" active={view === "history"} onClick={() => setView(view === "history" ? "chat" : "history")}>
+            <History className="h-4 w-4" />
+          </IconBtn>
+        )}
         <IconBtn label="Angel settings" active={view === "settings"} onClick={() => setView(view === "settings" ? "chat" : "settings")}>
           <Settings2 className="h-4 w-4" />
         </IconBtn>
@@ -67,7 +69,8 @@ export function AngelPanel() {
         </IconBtn>
       </header>
 
-      {view === "history" ? <HistoryView onOpen={() => setView("chat")} /> : view === "settings" ? <SettingsView /> : <ChatView />}
+      <QuotaBar />
+      {view === "history" && !a.guest ? <HistoryView onOpen={() => setView("chat")} /> : view === "settings" ? <SettingsView /> : <ChatView />}
     </section>
   );
 }
@@ -81,12 +84,50 @@ const IconBtn = forwardRef<HTMLButtonElement, { label: string; onClick: () => vo
 });
 
 // ======================= chat =======================
+/** Angel credits left in this window — only shown on limited plans. */
+function QuotaBar() {
+  const a = useAngel();
+  const q = a.quota;
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => tick((x) => x + 1), 30000);
+    return () => clearInterval(t);
+  }, []);
+  if (!q || q.limit === null) return null;
+  const left = q.remaining ?? 0;
+  const pct = Math.max(0, Math.min(100, (left / Math.max(1, q.limit)) * 100));
+  const reset = q.resetAt ? new Date(q.resetAt) : null;
+  const mins = reset ? Math.max(0, Math.ceil((reset.getTime() - Date.now()) / 60000)) : 0;
+  const wait = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+  return (
+    <div className="border-b border-border px-4 py-2">
+      <div className="flex items-center justify-between gap-2 text-[11px]">
+        <span className={cn("font-medium", left === 0 ? "text-danger" : left <= q.limit * 0.2 ? "text-warning" : "text-muted")}>
+          {left === 0 ? "No credits left" : `${left} of ${q.limit} credits left`}
+          {reset && <span className="font-normal text-muted"> · refills in {wait}</span>}
+        </span>
+        {a.guest ? (
+          <Link href="/register" className="flex items-center gap-1 font-medium text-primary hover:underline">
+            <Sparkles className="h-3 w-3" /> Get more free
+          </Link>
+        ) : q.plan !== "unlimited" ? (
+          <Link href="/plan" className="flex items-center gap-1 font-medium text-primary hover:underline">
+            <Sparkles className="h-3 w-3" /> Upgrade
+          </Link>
+        ) : null}
+      </div>
+      <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-surface-2">
+        <div className={cn("h-full rounded-full transition-all", left === 0 ? "bg-danger" : left <= q.limit * 0.2 ? "bg-warning" : "bg-primary")} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
 function ChatView() {
   const a = useAngel();
-  const { user } = useSession();
   const [text, setText] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
-  const first = user.name.split(" ")[0];
+  const first = a.firstName;
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" });
@@ -110,15 +151,22 @@ function ChatView() {
         ) : empty ? (
           <div className="flex min-h-full flex-col items-center justify-center pb-6 text-center">
             <AngelOrb size={150} state={a.mode} levelRef={a.levelRef} />
-            <h2 className="mt-4 text-xl font-semibold tracking-tight">Hi {first}, I&apos;m Angel.</h2>
-            <p className="mt-1 max-w-[30ch] text-sm text-muted">Ask about your money, get saving advice, or tell me what you spent — in English, हिंदी or ગુજરાતી.</p>
+            <h2 className="mt-4 text-xl font-semibold tracking-tight">Hi{first ? ` ${first}` : ""}, I&apos;m Angel.</h2>
+            <p className="mt-1 max-w-[32ch] text-sm text-muted">
+              {a.guest
+                ? "Ask me anything about money — budgeting, saving, loans, EMI / SIP / FD maths, currency rates — in English, हिंदी or ગુજરાતી."
+                : "Ask about your money, get saving advice, or tell me what you spent — in English, हिंदी or ગુજરાતી. I can also look things up on the web."}
+            </p>
             {a.voiceSupported && (
               <Button className="mt-5" size="lg" onClick={a.activate}>
                 <Mic className="h-4 w-4" /> Tap to talk
               </Button>
             )}
             <div className="mt-5 flex flex-wrap justify-center gap-2">
-              {["Mera balance kitna hai?", "Is mahine kitna kharcha hua?", "500 ka petrol add karo", "1 lakh kaise bachaun?"].map((s) => (
+              {(a.guest
+                ? ["5 lakh loan 9% 5 saal EMI?", "Budget kaise banaye?", "₹5,000 SIP 10 saal 12%", "100 dollar kitne rupaye?"]
+                : ["Mera balance kitna hai?", "Is mahine kitna kharcha hua?", "500 ka petrol add karo", "1 lakh kaise bachaun?"]
+              ).map((s) => (
                 <Chip key={s} onClick={() => void a.send(s, "text")}>{s}</Chip>
               ))}
             </div>
@@ -289,6 +337,44 @@ function CardView({ c }: { c: Card }) {
             </li>
           ))}
         </ul>
+      </div>
+    );
+  if (c.type === "links")
+    return (
+      <div className="mt-2 overflow-hidden rounded-xl border border-border bg-surface-2/60">
+        {c.title && <p className="border-b border-border px-3 py-2 text-xs font-medium text-muted">{c.title}</p>}
+        <ul className="divide-y divide-border">
+          {c.items
+            .filter((it) => /^https?:\/\//.test(it.url))
+            .map((it, i) => (
+              <li key={i}>
+                <a href={it.url} target="_blank" rel="noopener noreferrer nofollow" className="flex items-start gap-2 px-3 py-2 hover:bg-surface-2">
+                  <ExternalLink className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted" />
+                  <span className="min-w-0">
+                    <span className="block truncate text-[13px] font-medium text-primary">{it.title}</span>
+                    {it.snippet && <span className="line-clamp-2 block text-[11px] text-muted">{it.snippet}</span>}
+                    {it.source && <span className="block text-[10px] text-muted/80">{it.source}</span>}
+                  </span>
+                </a>
+              </li>
+            ))}
+        </ul>
+      </div>
+    );
+  if (c.type === "cta")
+    return (
+      <div className="mt-2 rounded-xl border border-primary/30 bg-primary/10 p-3">
+        <p className="text-[13px] font-semibold">{c.title}</p>
+        {c.text && <p className="mt-0.5 text-xs text-muted">{c.text}</p>}
+        <div className="mt-2 flex flex-wrap gap-2">
+          {c.actions
+            .filter((x) => x.href.startsWith("/") && !x.href.startsWith("//"))
+            .map((x) => (
+              <Link key={x.href} href={x.href} className={cn("rounded-lg px-3 py-1.5 text-xs font-medium", x.primary ? "bg-primary text-primary-fg hover:bg-primary/90" : "border border-border bg-surface hover:bg-surface-2")}>
+                {x.label}
+              </Link>
+            ))}
+        </div>
       </div>
     );
   return <SecretCard title={c.title} value={c.value} note={c.note} />;
@@ -477,10 +563,64 @@ function SettingsView() {
       <Row title="Speak replies" desc="Angel answers out loud when you talk to her.">
         <Toggle checked={s.speakReplies} onChange={(v) => a.updateSettings({ speakReplies: v })} label="Speak replies" />
       </Row>
+      <VoicePicker />
       {!a.voiceSupported && <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-warning">This browser has no speech recognition. Use Chrome, Edge or Safari for voice — typing works everywhere.</p>}
       <p className="text-xs leading-relaxed text-muted">
-        Angel is Budget Pro&apos;s own assistant: your questions are answered on our server from your Budget Pro data — no outside AI service. Turning speech into text is done by your browser&apos;s built-in voice engine (in Chrome this sends the audio to Google&apos;s speech service; with the wake word on, it listens while Budget Pro is open on screen). Settings here are saved on this device.
+        Angel is Budget Pro&apos;s own assistant: questions about your money are answered on our server from your Budget Pro data — no outside AI service. General questions (news, prices, “google karo…”) are looked up on the web and shown with their sources. Turning speech into text is done by your browser&apos;s built-in voice engine (in Chrome this sends the audio to Google&apos;s speech service; with the wake word on, it listens while Budget Pro is open on screen). Settings here are saved on this device.
       </p>
+    </div>
+  );
+}
+
+const SAMPLE: Record<string, string> = {
+  en: "Hi, I'm Angel. You spent ₹12,450 this month — ₹1,200 less than last month.",
+  hn: "Namaste, main Angel hoon. Is mahine aapne ₹12,450 kharch kiye — pichle mahine se ₹1,200 kam.",
+  hi: "नमस्ते, मैं एंजल हूं। इस महीने आपने ₹12,450 खर्च किए — पिछले महीने से ₹1,200 कम।",
+  gu: "નમસ્તે, હું એન્જલ છું. આ મહિને તમે ₹12,450 ખર્ચ્યા — ગયા મહિના કરતાં ₹1,200 ઓછા.",
+};
+
+/** Choose Angel's speaking voice per language (the most natural one is picked automatically). */
+function VoicePicker() {
+  const a = useAngel();
+  const [lang, setLang] = useState<"en" | "hn" | "hi" | "gu">(a.settings.voiceLang === "gu-IN" ? "gu" : a.settings.voiceLang === "en-IN" ? "en" : "hi");
+  const [list, setList] = useState<ReturnType<typeof listVoices>>([]);
+  useEffect(() => {
+    const load = () => setList(listVoices(lang));
+    load();
+    const t = setTimeout(load, 600); // some browsers load voices late
+    return () => clearTimeout(t);
+  }, [lang]);
+  const value = a.settings.voices?.[lang] ?? "";
+  return (
+    <div>
+      <p className="font-medium">Angel&apos;s voice</p>
+      <p className="mt-0.5 text-xs text-muted">Angel picks the most natural voice on this device automatically. For the best voices use Microsoft Edge (“Natural” voices) or Chrome (Google voices).</p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <select value={lang} onChange={(e) => setLang(e.target.value as typeof lang)} className="rounded-lg border border-border bg-surface-2 px-2.5 py-1.5" aria-label="Language">
+          <option value="hi">हिंदी</option>
+          <option value="hn">Hinglish</option>
+          <option value="en">English</option>
+          <option value="gu">ગુજરાતી</option>
+        </select>
+        <select
+          value={value}
+          onChange={(e) => a.updateSettings({ voices: { ...a.settings.voices, [lang]: e.target.value || undefined } })}
+          className="min-w-0 flex-1 rounded-lg border border-border bg-surface-2 px-2.5 py-1.5"
+          aria-label="Voice"
+        >
+          <option value="">Automatic (best available)</option>
+          {list.map((v) => (
+            <option key={v.name} value={v.name}>
+              {v.natural ? "★ " : ""}
+              {v.label}
+            </option>
+          ))}
+        </select>
+        <button type="button" onClick={() => speak(SAMPLE[lang], lang)} className="flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 text-xs hover:bg-surface-2">
+          <Play className="h-3.5 w-3.5" /> Test
+        </button>
+      </div>
+      {list.length === 0 && <p className="mt-1.5 text-[11px] text-warning">No voice for this language is installed on this device — replies will be shown as text.</p>}
     </div>
   );
 }

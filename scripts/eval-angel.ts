@@ -268,6 +268,54 @@ export const HELDOUT2: [string, string][] = [
 ["hey","greet"],["tumhara naam kya hai","identity"],["shukriya angel","thanks"],
 ];
 
+// Third held-out set (written fresh in v3, before tuning).
+export const HELDOUT3: [string, string][] = [
+["bata na kitne paise bache hai abhi","balance"],["mere khate me total kya hai","balance"],["how much money is in my account","balance"],["હાલ મારી પાસે કેટલા રૂપિયા છે","balance"],["बैलेंस दिखाओ","balance"],
+["october me kitna kharcha gaya","expense"],["kal kitna kharch hua","expense"],["food delivery pe kitna udaya is mahine","expense"],["how much did i spend on fuel last month","expense"],["આ અઠવાડિયે કેટલો ખર્ચ થયો","expense"],["पिछले महीने कितना खर्च किया","expense"],["bijli bill pe kitna gaya is saal","expense"],
+["pichle mahine ki kamai kitni thi","income"],["is saal total kitni salary aayi","income"],["what was my income in september","income"],["ગયા મહિને કેટલી કમાણી થઈ","income"],["इस महीने कितने पैसे आए","income"],
+["is mahine ki bachat batao","savings"],["how much have i saved this year","savings"],
+["mera paisa sabse zyada kahan jata hai","top_categories"],["top spending categories this month","top_categories"],["કયા ખર્ચમાં સૌથી વધુ પૈસા ગયા","top_categories"],
+["is mahine aur pichle mahine ka farak","compare"],["compare my spending with last month","compare"],
+["is baar kharcha itna zyada kyu hua","explain_change"],["why did i save less this month","explain_change"],
+["sabse bada kharcha kaunsa tha","largest"],["biggest expense this month","largest"],
+["aaj kya kya entry hui","recent"],["show my latest expenses","recent"],["आखिरी एंट्री बताओ","recent"],
+["home loan kitna baaki hai","debts"],["agli emi kab bharni hai","debts"],["how much loan is left","debts"],["મારી લોન કેટલી બાકી છે","debts"],["मेरे लोन की जानकारी","debts"],
+["mere goals kaise chal rahe hai","goals"],["trip goal kitna pura hua","goals"],["am i on track for my goals","goals"],["મારા ગોલ કેવા ચાલે છે","goals"],
+["budget me kitna bacha hai","budget_status"],["shopping ka budget cross hua kya","budget_status"],["am i within budget","budget_status"],["मेरा बजट कितना बचा है","budget_status"],
+["food ka budget 6000 rakh do","set_budget"],["set monthly budget 40000","set_budget"],["shopping budget 3000 kar do","set_budget"],
+["meri financial health kaisi hai","health"],["give me my money score","health"],
+["paise bachane ke tips do","advice"],["koi suggestion do mere kharche pe","insights"],
+["6 mahine me 60000 kaise bachau","advice"],["help me save for a bike in one year","advice"],
+["kya main 40000 ka laptop le sakta hu","afford"],["can i afford a 2 lakh trip","afford"],
+["mahine ke end tak kitna kharch ho jayega","forecast"],["what will i spend by month end","forecast"],
+["daily average kharcha kitna hai","average"],["average monthly income","average"],
+["sip kya hai samjhao","kb"],["what is an emergency fund","emergency_fund"],["credit card ka bill kaise manage kare","kb"],["inflation kya hota hai","kb"],
+["kitna emergency fund hona chahiye mera","emergency_fund"],
+["meri monthly subscriptions kya kya hai","subscriptions"],
+["mera 50 30 20 split dikhao","rule_503020"],
+["chai 20","add_expense"],["auto 250","add_expense"],["rent bhara 12000","add_expense"],["bijli ka bill 1840 bhara","add_expense"],["dhobi ko 300 diye","add_expense"],["paid 899 for netflix","add_expense"],["પેટ્રોલ 500 ઉમેરો","add_expense"],["किराया 15000 दिया","add_expense"],["kal 450 ki sabzi li","add_expense"],
+["mummy ne 2000 diye","add_income"],["got a bonus of 5000","add_income"],["freelance se 15000 aaye","add_income"],["પગાર 45000 આવ્યો","add_income"],["सैलरी 50000 आई","add_income"],
+["car goal me 5000 daal do","goal_contribute"],["add 2000 to vacation goal","goal_contribute"],
+["goal se 2000 nikalo","goal_withdraw"],["withdraw 3000 from emergency fund goal","goal_withdraw"],
+["trip ke liye 50000 ka goal banao december tak","create_goal"],["create a goal of 1 lakh for a car","create_goal"],
+["home loan ki emi bhar di","pay_emi"],["paid this month's car loan emi","pay_emi"],
+["naya loan add karo bike 80000 emi 4000","create_debt"],
+["aakhri entry hatao","delete_last"],["आखिरी एंट्री डिलीट करो","delete_last"],["undo last expense entry delete it","delete_last"],
+["kal wala petrol ka kharcha delete karo","delete_entry"],["remove the netflix expense","delete_entry"],
+["pichli entry ka amount 600 kar do","edit_last"],["change the last entry to 450","edit_last"],
+["undo","undo"],["wapas lo","undo"],
+["platform pe kitne users hai","platform_summary"],["how many users signed up","platform_summary"],
+["aaj kitne log aaye site pe","visitors"],["visitors today","visitors"],
+["rahul ka plan pro kar do","change_plan"],["upgrade neha to unlimited","change_plan"],
+["naya user banao sonal sonal@gmail.com","create_user"],["create user vikas vikas@yahoo.com","create_user"],
+["vikas ko block karo","disable_user"],["deactivate sonal","disable_user"],
+["vikas ko unblock karo","enable_user"],
+["sonal ka password reset karo","reset_password"],
+["neha ka account delete kar do","delete_user"],
+["sabse zyada kharcha kaun karta hai","top_users"],
+["namaste angel","greet"],["good morning","greet"],["tum kaun ho","identity"],["thank you","thanks"],["tum kya kya kar sakti ho","help"],
+];
+
 const verbose = process.argv.includes("-v");
 function run(name: string, set: [string, string][]) {
   let pass = 0;
@@ -281,5 +329,5 @@ function run(name: string, set: [string, string][]) {
   console.log(`${name}: ${pass}/${set.length} understood correctly (${Math.round((pass / set.length) * 100)}%)`);
   return pass === set.length;
 }
-const all = [run("Benchmark", EVAL), run("Held-out #1 (never seen)", HELDOUT), run("Held-out #2 (never seen)", HELDOUT2)];
+const all = [run("Benchmark", EVAL), run("Held-out #1 (never seen)", HELDOUT), run("Held-out #2 (never seen)", HELDOUT2), run("Held-out #3 (never seen)", HELDOUT3)];
 if (all.some((x) => !x)) process.exit(1);

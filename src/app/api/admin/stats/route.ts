@@ -1,5 +1,5 @@
 import { route, ok } from "@/lib/api";
-import { AngelConversation, AngelMessage, AuditLog, COLLECTIONS, Expense, Income, User, Visit } from "@/lib/models";
+import { AngelConversation, AngelMessage, AuditLog, COLLECTIONS, Expense, Income, Payment, User, Visit } from "@/lib/models";
 import { resolveMail } from "@/lib/mailer";
 import { fromMinor } from "@/lib/money";
 import { currentMonthKey, lastMonths, monthLabel, monthRange } from "@/lib/analytics";
@@ -11,7 +11,8 @@ export const GET = route({ admin: true, perms: ["users.view"] }, async ({ perms 
   const from = monthRange(months[0]).start;
 
   const dayStart = new Date(Date.now() - 24 * 3600 * 1000);
-  const [userAgg, counts, incomeSum, expenseSum, signups, recent, online, visitorsToday, angelChats, angelMsgs7d, mail, newUsers7d, unverified] = await Promise.all([
+  const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
+  const [userAgg, counts, incomeSum, expenseSum, signups, recent, online, visitorsToday, angelChats, angelMsgs7d, mail, newUsers7d, unverified, revenue] = await Promise.all([
     User.aggregate([
       {
         $group: {
@@ -43,6 +44,10 @@ export const GET = route({ admin: true, perms: ["users.view"] }, async ({ perms 
     resolveMail(),
     User.countDocuments({ createdAt: { $gte: new Date(Date.now() - 7 * 86400000) } }),
     User.countDocuments({ emailVerified: false }),
+    Payment.aggregate([
+      { $match: { status: "paid" } },
+      { $group: { _id: null, all: { $sum: "$amount" }, n: { $sum: 1 }, month: { $sum: { $cond: [{ $gte: ["$paidAt", monthStart] }, "$amount", 0] } }, monthN: { $sum: { $cond: [{ $gte: ["$paidAt", monthStart] }, 1, 0] } } } },
+    ]),
   ]);
 
   const signupMap = new Map<string, number>(
@@ -60,6 +65,7 @@ export const GET = route({ admin: true, perms: ["users.view"] }, async ({ perms 
     signups: months.map((k) => ({ month: k, label: monthLabel(k), users: signupMap.get(k) ?? 0 })),
     live: { onlineNow: online[0]?.n ?? 0, visitors24h: visitorsToday[0]?.n ?? 0, newUsers7d, unverified },
     angel: { conversations: angelChats, questions7d: angelMsgs7d },
+    revenue: { all: (revenue[0]?.all ?? 0) / 100, payments: revenue[0]?.n ?? 0, month: (revenue[0]?.month ?? 0) / 100, monthPayments: revenue[0]?.monthN ?? 0 },
     email: { ready: Boolean(mail.pass), source: mail.source, from: mail.fromEmail },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     recent: recent.map((a: any) => ({ id: String(a._id), action: a.action, actorEmail: a.actorEmail ?? "system", resource: a.resource ?? null, createdAt: a.createdAt })),

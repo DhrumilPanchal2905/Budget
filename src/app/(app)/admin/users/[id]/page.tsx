@@ -29,7 +29,10 @@ interface Detail {
     effectivePermissions: string[];
     createdAt: string;
     lastLoginAt: string | null;
+    planExpiresAt?: string | null;
+    planSource?: string | null;
   };
+  payments?: { id: string; plan: string; amount: number; status: string; at: string; invoiceNo: string | null; paymentId: string | null; method: string | null; periodEnd: string | null }[];
   plan: { name: string; maxFinanceRecords: number | null; maxGoals: number | null; unlimited: boolean };
   usage: { incomes: number; expenses: number; debts: number; goals: number; financeRecords: number };
   activeSessions: number;
@@ -318,6 +321,8 @@ function Inner() {
       />
       <div className="mb-4 flex flex-wrap gap-1.5">
         <Badge tone={u.plan === "free" ? "default" : u.plan === "unlimited" ? "success" : "primary"}>{u.plan.toUpperCase()}</Badge>
+        {u.planExpiresAt && <Badge tone="info">paid · until {new Date(u.planExpiresAt).toLocaleDateString("en-IN")}</Badge>}
+        {(data.payments?.filter((p) => p.status === "paid").length ?? 0) > 0 && <Badge tone="success">₹{data.payments!.filter((p) => p.status === "paid").reduce((a, p) => a + p.amount, 0).toLocaleString("en-IN")} paid</Badge>}
         <Badge tone={u.role === "admin" ? "warning" : "default"}>{u.role}</Badge>
         <Badge tone={u.status === "active" ? "success" : "danger"}>{u.status}</Badge>
         <Badge>{data.activeSessions} active session{data.activeSessions === 1 ? "" : "s"}</Badge>
@@ -360,6 +365,28 @@ function Inner() {
               <div className="px-3 pb-4 pt-4 sm:px-5">
                 <IncomeExpenseBars data={data.monthly} height={260} />
               </div>
+            </Card>
+          )}
+          {data.payments && data.payments.length > 0 && (
+            <Card>
+              <CardHeader title="Payments" subtitle="Plan purchases by this user" />
+              <ul className="divide-y divide-border px-5 pb-3">
+                {data.payments.map((p) => (
+                  <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
+                    <span>
+                      <b className="capitalize">{p.plan}</b> · ₹{p.amount.toLocaleString("en-IN")} <span className="text-muted">· {new Date(p.at).toLocaleString("en-IN")}{p.method ? ` · ${p.method.toUpperCase()}` : ""}</span>
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <Badge tone={p.status === "paid" ? "success" : p.status === "failed" ? "danger" : "warning"}>{p.status === "created" ? "not completed" : p.status}</Badge>
+                      {p.invoiceNo && p.status === "paid" && (
+                        <Link href={`/plan/invoice/${p.id}`} className="text-xs text-primary hover:underline">
+                          {p.invoiceNo}
+                        </Link>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
             </Card>
           )}
           {data.whereabouts && (data.whereabouts.sessions.length > 0 || data.whereabouts.visits.length > 0) && (

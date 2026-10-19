@@ -7,5 +7,5 @@ export const runtime = "nodejs";
 export const GET = route({}, async ({ user }) => {
   const plan = planForUser(user);
   const usage = await getUsage(String(user._id));
-  return ok({ current: plan, usage, plans: plan.unlimited ? [...PUBLIC_PLAN_IDS.map((id) => PLANS[id]), PLANS.unlimited] : PUBLIC_PLAN_IDS.map((id) => PLANS[id]) });
+  return ok({ current: plan, usage, plans: PUBLIC_PLAN_IDS.map((id) => PLANS[id]) });
 });

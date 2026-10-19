@@ -2,6 +2,8 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { jsonLd, breadcrumbLd } from "@/lib/seo";
 import { WarmUp } from "./warmup";
+import { GuestAngelLoader } from "./guest-angel-loader";
+import { TOOLS } from "@/lib/tools-registry";
 
 const NAV = [
   { href: "/features", label: "Features" },
@@ -16,6 +18,7 @@ export function PublicShell({ children, crumbs }: { children: ReactNode; crumbs?
   return (
     <div className="relative min-h-screen overflow-x-hidden">
       <WarmUp />
+      <GuestAngelLoader />
       <div className="bg-grid pointer-events-none absolute inset-0 opacity-30 [mask-image:radial-gradient(ellipse_at_top,black,transparent_70%)]" />
       <header className="relative mx-auto flex max-w-6xl items-center justify-between gap-3 px-5 py-5">
         <Link href="/" className="flex items-center gap-2.5" aria-label="Budget Pro home">
@@ -88,6 +91,9 @@ export function PublicShell({ children, crumbs }: { children: ReactNode; crumbs?
               <li><Link href="/tools/budget-planner" className="hover:text-fg">50/30/20 budget planner</Link></li>
               <li><Link href="/tools/savings-goal-calculator" className="hover:text-fg">Savings goal calculator</Link></li>
               <li><Link href="/tools/sip-calculator" className="hover:text-fg">SIP calculator</Link></li>
+              <li><Link href="/tools/income-tax-calculator" className="hover:text-fg">Income tax calculator</Link></li>
+              <li><Link href="/tools/fd-calculator" className="hover:text-fg">FD calculator</Link></li>
+              <li><Link href="/tools" className="hover:text-fg">All {TOOLS.length} tools →</Link></li>
             </ul>
           </div>
           <div>
@@ -97,6 +103,8 @@ export function PublicShell({ children, crumbs }: { children: ReactNode; crumbs?
               <li><Link href="/faq" className="hover:text-fg">FAQ</Link></li>
               <li><Link href="/privacy" className="hover:text-fg">Privacy</Link></li>
               <li><Link href="/terms" className="hover:text-fg">Terms</Link></li>
+              <li><Link href="/refund-policy" className="hover:text-fg">Refund policy</Link></li>
+              <li><Link href="/contact" className="hover:text-fg">Contact</Link></li>
             </ul>
           </div>
         </div>

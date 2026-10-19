@@ -3,7 +3,7 @@
 // Actions (add expense, add income, goal contribution, EMI payment, new goal/loan, delete, create user, change plan)
 // reuse the SAME server functions as the app — so plan limits, validation, audit log, realtime refresh and
 // notifications all apply exactly as if the user clicked the buttons.
-import { AngelMessage, Budget, Debt, Expense, Goal, GoalContribution, Income, Session, User, isObjectId, oid, type UserDoc } from "../models";
+import { AngelMessage, Budget, Debt, Expense, Goal, GoalContribution, Income, Payment, Session, User, isObjectId, oid, type UserDoc } from "../models";
 import type { Permission } from "../permissions";
 import { DEFAULT_USER_PERMISSIONS, isAdminPermission } from "../permissions";
 import { contributeGoal, createRecord, deleteRecord, getUsage, goalInsight, goalPaces, payDebt, requiredPerms, updateRecord } from "../finance";
@@ -17,7 +17,7 @@ import { audit } from "../audit";
 import { notifyUser } from "../notify";
 import { publish, userChannel } from "../realtime";
 import { randomBytes } from "crypto";
-import { hashPassword } from "../auth";
+import { hashPassword, invalidateUserCache } from "../auth";
 import { getPlan, planForUser } from "../plans";
 import { toMinor, fromMinor } from "../money";
 import { APP_TIMEZONE } from "../env";
@@ -26,9 +26,11 @@ import { parse, QUERY_INTENTS, type Intent, type Lang, type Parsed } from "./par
 import { addMonths, parseYmd, thisMonth, ymd, type Period } from "./dates";
 import { L, catLabel, dateLabel, forSpeech, greetingByHour, money, monthName, pctStr, periodLabel, signedMoney, who as whoOf, type T4, type Who } from "./i18n";
 import { checkAfford, planSavings, type AdvisorInput } from "./advisor";
-import { nameKey, levenshtein, phonetic } from "./text";
+import { nameKey, levenshtein, normalize, phonetic } from "./text";
 import * as T from "./tools";
 import type { ActionKind, ActionStatus, ActionView, AngelLangPref, Card } from "./types";
+import { calculate, looksLikeCalc } from "./calc";
+import { hasPriceWord, isLiveQuestion, isWebCommand, looksLikeQuestion, webReply } from "./web";
 
 // ======================= types =======================
 export interface StoredAction {
@@ -108,6 +110,76 @@ export interface EngineResult {
   usedText?: string;
   /** an earlier Angel message whose action changed (confirmed / cancelled by voice) */
   updateMessage?: { id: string; action: StoredAction };
+  /** the answer needed a web look-up (costs more Angel credits) */
+  web?: boolean;
+}
+
+/** "revenue kitna hua", "aaj kitni payments aayi", "kisne plan kharida" (admin) · "mera plan kab tak hai" (anyone) */
+const PAYMENT_Q = /\b(revenue|payments?|paid users?|paying users?|sales|razorpay|subscriptions? sold|plan (kharida|liya|kharidya|bought|purchase[ds]?)|bought (a )?plan|purchases?)\b|पेमेंट|भुगतान|रेवेन्यू|પેમેન્ટ|ચુકવણી|રેવન્યુ/;
+const MY_PLAN_Q = /\b(my plan|mera plan|maro plan|plan (kab tak|kyare sudhi|expire|ends?|khatam)|subscription (kab tak|ends?))\b|मेरा प्लान|મારો પ્લાન/;
+
+async function answerPayments(lang: Lang, inp: EngineInput): Promise<EngineReply> {
+  const now = new Date();
+  const dayStart = new Date(now.getTime() - 24 * 3600 * 1000);
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const [agg] = await Payment.aggregate([
+    { $match: { status: "paid" } },
+    { $group: { _id: null, all: { $sum: "$amount" }, n: { $sum: 1 }, month: { $sum: { $cond: [{ $gte: ["$paidAt", monthStart] }, "$amount", 0] } }, monthN: { $sum: { $cond: [{ $gte: ["$paidAt", monthStart] }, 1, 0] } }, today: { $sum: { $cond: [{ $gte: ["$paidAt", dayStart] }, "$amount", 0] } }, todayN: { $sum: { $cond: [{ $gte: ["$paidAt", dayStart] }, 1, 0] } } } },
+  ]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recent: any[] = await Payment.find({ status: "paid" }).sort({ paidAt: -1 }).limit(6).select("name email plan amount paidAt").lean();
+  const r = (n: number) => money(Math.round((n ?? 0) / 100), "INR");
+  const a = agg ?? { all: 0, n: 0, month: 0, monthN: 0, today: 0, todayN: 0 };
+  const text = L(lang, {
+    en: `Revenue: ${r(a.today)} in the last 24 hours (${a.todayN} payment${a.todayN === 1 ? "" : "s"}), ${r(a.month)} this month (${a.monthN}), ${r(a.all)} all time (${a.n}).`,
+    hi: `कमाई: पिछले 24 घंटे में ${r(a.today)} (${a.todayN} पेमेंट), इस महीने ${r(a.month)} (${a.monthN}), अब तक कुल ${r(a.all)} (${a.n})।`,
+    gu: `આવક: છેલ્લા 24 કલાકમાં ${r(a.today)} (${a.todayN} પેમેન્ટ), આ મહિને ${r(a.month)} (${a.monthN}), અત્યાર સુધી કુલ ${r(a.all)} (${a.n}).`,
+    hn: `Revenue: pichle 24 ghante mein ${r(a.today)} (${a.todayN} payment), is mahine ${r(a.month)} (${a.monthN}), ab tak total ${r(a.all)} (${a.n}).`,
+  });
+  const card: Card = { type: "list", title: L(lang, { en: "Latest payments", hi: "हाल के पेमेंट", gu: "તાજેતરના પેમેન્ટ", hn: "Latest payments" }), items: recent.map((p) => ({ title: `${p.name} · ${String(p.plan).toUpperCase()}`, subtitle: `${p.email} · ${dateLabel(lang, new Date(p.paidAt).toISOString().slice(0, 10))}`, value: r(p.amount), tone: "pos" as const })) };
+  return reply(lang, text, { cards: recent.length ? [card] : [], suggestions: sug(lang, "admin") });
+}
+
+async function answerMyPlan(lang: Lang, inp: EngineInput): Promise<EngineReply> {
+  const plan = planForUser(inp.actor);
+  const exp = inp.actor.role !== "admin" && inp.actor.planExpiresAt && plan.id !== "free" ? new Date(inp.actor.planExpiresAt) : null;
+  const credits = plan.angel.credits === null ? L(lang, { en: "unlimited Angel", hi: "अनलिमिटेड एंजल", gu: "અનલિમિટેડ એન્જલ", hn: "unlimited Angel" }) : L(lang, { en: `${plan.angel.credits} Angel credits every ${plan.angel.windowHours} hours`, hi: `हर ${plan.angel.windowHours} घंटे में ${plan.angel.credits} एंजल क्रेडिट`, gu: `દર ${plan.angel.windowHours} કલાકે ${plan.angel.credits} એન્જલ ક્રેડિટ`, hn: `har ${plan.angel.windowHours} ghante mein ${plan.angel.credits} Angel credits` });
+  const until = exp ? dateLabel(lang, exp.toISOString().slice(0, 10)) : null;
+  const text = L(lang, {
+    en: `You're on the ${plan.name} plan${until ? ` until ${until}` : ""} — ${credits}. ${plan.id === "unlimited" ? "No limits at all." : "See Plan & billing to upgrade or renew."}`,
+    hi: `आप ${plan.name} प्लान पर हैं${until ? ` (${until} तक)` : ""} — ${credits}। ${plan.id === "unlimited" ? "कोई लिमिट नहीं।" : "अपग्रेड या रिन्यू के लिए Plan & billing देखिए।"}`,
+    gu: `તમે ${plan.name} પ્લાન પર છો${until ? ` (${until} સુધી)` : ""} — ${credits}. ${plan.id === "unlimited" ? "કોઈ લિમિટ નથી." : "અપગ્રેડ કે રિન્યૂ માટે Plan & billing જુઓ."}`,
+    hn: `Aap ${plan.name} plan pe hain${until ? ` (${until} tak)` : ""} — ${credits}. ${plan.id === "unlimited" ? "Koi limit nahi." : "Upgrade ya renew ke liye Plan & billing dekhiye."}`,
+  });
+  return reply(lang, text, { cards: plan.id === "unlimited" ? [] : [{ type: "cta", title: L(lang, { en: "Plans", hi: "प्लान", gu: "પ્લાન", hn: "Plans" }), actions: [{ label: L(lang, { en: "See plans", hi: "प्लान देखें", gu: "પ્લાન જુઓ", hn: "Plans dekho" }), href: "/plan", primary: true }] }] });
+}
+
+const WRITE_INTENTS: Intent[] = ["add_expense", "add_income", "goal_contribute", "goal_withdraw", "pay_emi", "create_goal", "create_debt", "delete_last", "delete_entry", "edit_last", "set_budget", "create_user", "change_plan", "delete_user", "disable_user", "enable_user", "reset_password"];
+
+/**
+ * Questions about the WORLD, not about the user's own entries: calculators ("5 lakh 9% 5 saal EMI"),
+ * "google karo …", live prices / news. Returns null when the message is about the user's money.
+ * Shared by the signed-in engine and the guest engine.
+ */
+export async function worldAnswer(raw: string, p: Parsed, lang: Lang, cur: string): Promise<{ reply: EngineReply; web: boolean } | null> {
+  const writing = WRITE_INTENTS.includes(p.intent);
+  if (looksLikeCalc(raw)) {
+    const c = await calculate(raw, lang, cur);
+    if (c && !(c.kind === "need" && writing)) {
+      const cards: Card[] = [...(c.cards ?? [])];
+      if (c.source) cards.push({ type: "links", items: [{ title: c.source.title, url: c.source.url, source: new URL(c.source.url).hostname }] });
+      return { reply: reply(lang, c.text, { speak: c.speak || c.text, cards }), web: c.kind === "fx" };
+    }
+  }
+  if (writing && p.amount) return null; // "aaj petrol 500" is an expense, not a petrol-price question
+  const web = isWebCommand(raw);
+  // "petrol pe aaj kitna gaya" is the user's own spending; "petrol ka aaj ka bhav" is a price question
+  const live = isLiveQuestion(raw) && !(p.intent !== "unknown" && p.intent !== "kb" && QUERY_INTENTS.includes(p.intent) && (p.expenseCategory || p.hits.self) && !hasPriceWord(raw));
+  if (!web && !live) return null;
+  // "search my swiggy expenses" / "mera balance google karo" are still about the user's own data
+  if (web && !live && p.intent !== "unknown" && p.intent !== "kb" && QUERY_INTENTS.includes(p.intent) && (p.hits.self || p.hits.expense || p.hits.income || p.hits.recent || p.hits.balance)) return null;
+  const w = await webReply(raw, lang, { live });
+  return { reply: reply(lang, w.text, { speak: w.speak, cards: w.cards }), web: true };
 }
 
 export function actionView(a: StoredAction | null | undefined): ActionView | null {
@@ -1289,6 +1361,7 @@ async function execute(kind: ActionKind, payload: Record<string, unknown>, owner
       await User.updateOne({ _id: target._id }, { $set: { status } });
       if (status === "disabled") {
         await Session.deleteMany({ userId: target._id });
+        invalidateUserCache(String(target._id));
         await publish([userChannel(String(target._id))], "session:revoked", {});
       } else {
         await notifyUser(String(target._id), { type: "admin", title: "Account re-enabled", message: "An administrator re-enabled your account. Welcome back!", link: "/dashboard" });
@@ -1306,6 +1379,7 @@ async function execute(kind: ActionKind, payload: Record<string, unknown>, owner
       const temp = makeTempPassword();
       await User.updateOne({ _id: target._id }, { $set: { passwordHash: await hashPassword(temp) } });
       await Session.deleteMany({ userId: target._id });
+      invalidateUserCache(String(target._id));
       await publish([userChannel(String(target._id))], "session:revoked", {});
       await audit({ actor: actor.user, action: "admin.user.password_reset", resource: "user", resourceId: String(target._id), targetUserId: String(target._id), metadata: { via: "angel" }, ip: actor.ip });
       await notifyUser(String(target._id), { type: "admin", title: "Password reset by admin", message: "An administrator reset your password. Sign in with the temporary password they share with you, then change it in Settings.", link: "/settings" });
@@ -1359,7 +1433,9 @@ async function execute(kind: ActionKind, payload: Record<string, unknown>, owner
       if (String(target._id) === String(actor.user._id)) throw new ApiError(400, "You cannot change your own plan. Ask another administrator.");
       if (target.role === "admin") throw new ApiError(400, "Admins always have the Unlimited plan.");
       const plan = String(payload.plan);
-      await User.updateOne({ _id: target._id }, { $set: { plan } });
+      // a plan given by an admin has no end date (a bought plan's end date is cleared)
+      await User.updateOne({ _id: target._id }, { $set: { plan, planExpiresAt: null, planSource: "admin" }, $unset: { planReminderAt: 1 } });
+      invalidateUserCache(String(target._id));
       await publish([userChannel(String(target._id))], "profile:changed", {});
       await audit({ actor: actor.user, action: "admin.user.plan_change", resource: "user", resourceId: String(target._id), targetUserId: String(target._id), metadata: { changes: ["plan"], plan: { from: target.plan, to: plan }, via: "angel" }, ip: actor.ip });
       await notifyUser(String(target._id), { type: "admin", title: "Account updated by admin", message: `An administrator updated your account: your plan is now ${getPlan(plan).name}.`, link: "/plan" });
@@ -1914,20 +1990,39 @@ const IDENTITY: T4 = {
 };
 
 const HELP: T4 = {
-  en: "Here's what I can do:\n• Answer: “What's my balance?”, “Food spending last month?”, “Where did my money go?”, “Next EMI?”, “Am I over budget?”\n• Think: “Why did my spending go up?”, “How can I save 1 lakh in 6 months?”, “Can I afford a ₹50,000 phone?”, “Are my goals on track?”, “My 50/30/20 split”\n• Explain: “What is a SIP?”, “How much emergency fund do I need?”, “Avalanche or snowball?”\n• Do: “Add 500 petrol”, “Salary 50000 received”, “Food budget 5000”, “Put 2000 in my bike goal”, “EMI paid”, “Delete the swiggy expense”, “Undo”.\nI understand English, हिंदी, ગુજરાતી and Hinglish — by voice or text.",
-  hi: "मैं ये कर सकती हूं:\n• जवाब: “मेरा बैलेंस कितना है?”, “पिछले महीने खाने पर कितना खर्च हुआ?”, “पैसा कहां गया?”, “अगली EMI कब है?”, “बजट पार हुआ क्या?”\n• सोच-समझकर सलाह: “खर्च क्यों बढ़ा?”, “6 महीने में 1 लाख कैसे बचाऊं?”, “क्या मैं ₹50,000 का फोन ले सकता हूं?”, “मेरे गोल सही चल रहे हैं?”, “मेरा 50/30/20”\n• समझाना: “SIP क्या है?”, “इमरजेंसी फंड कितना चाहिए?”, “पहले कौन सा लोन चुकाऊं?”\n• काम: “500 का पेट्रोल जोड़ो”, “50000 सैलरी आई”, “खाने का बजट 5000”, “बाइक गोल में 2000 डालो”, “EMI भर दी”, “swiggy वाला खर्च हटाओ”, “वापस लो”।\nमैं English, हिंदी, ગુજરાતી और Hinglish — बोलकर या लिखकर — समझती हूं।",
-  gu: "હું આ કરી શકું છું:\n• જવાબ: “મારું બેલેન્સ કેટલું છે?”, “ગયા મહિને ખાવામાં કેટલો ખર્ચ થયો?”, “પૈસા ક્યાં ગયા?”, “આગલી EMI ક્યારે છે?”, “બજેટ પાર થયું?”\n• વિચારીને સલાહ: “ખર્ચ કેમ વધ્યો?”, “6 મહિનામાં 1 લાખ કેવી રીતે બચાવું?”, “શું હું ₹50,000 નો ફોન લઈ શકું?”, “મારા ગોલ બરાબર ચાલે છે?”, “મારો 50/30/20”\n• સમજાવવું: “SIP શું છે?”, “ઇમરજન્સી ફંડ કેટલું જોઈએ?”, “કઈ લોન પહેલાં ચૂકવું?”\n• કામ: “500 નું પેટ્રોલ ઉમેરો”, “પગાર 50000 આવ્યો”, “ખાવાનું બજેટ 5000”, “બાઇક ગોલમાં 2000 નાખો”, “EMI ભરી દીધી”, “swiggy વાળો ખર્ચ કાઢો”, “પાછું કરો”.\nહું English, हिंदी, ગુજરાતી અને Hinglish — બોલીને કે લખીને — સમજું છું.",
-  hn: "Main ye kar sakti hoon:\n• Jawab: “Mera balance kitna hai?”, “Pichle mahine food pe kitna kharcha hua?”, “Paisa kahan gaya?”, “Agli EMI kab hai?”, “Budget cross hua kya?”\n• Soch-samajh kar salah: “Kharcha kyu badha?”, “6 mahine mein 1 lakh kaise bachaun?”, “Kya main ₹50,000 ka phone le sakta hun?”, “Mere goals on track hain?”, “Mera 50/30/20”\n• Samjhana: “SIP kya hai?”, “Emergency fund kitna chahiye?”, “Pehle kaunsa loan chukaun?”\n• Kaam: “500 ka petrol add karo”, “50000 salary aayi”, “Food budget 5000”, “Bike goal mein 2000 daalo”, “EMI bhar di”, “Swiggy wala kharcha hatao”, “Undo karo”.\nMain English, हिंदी, ગુજરાતી aur Hinglish — bolkar ya likhkar — samajhti hoon.",
+  en: "Here's what I can do:\n• Answer: “What's my balance?”, “Food spending last month?”, “Where did my money go?”, “Next EMI?”, “Am I over budget?”\n• Think: “Why did my spending go up?”, “How can I save 1 lakh in 6 months?”, “Can I afford a ₹50,000 phone?”, “Are my goals on track?”, “My 50/30/20 split”\n• Explain: “What is a SIP?”, “How much emergency fund do I need?”, “Avalanche or snowball?”\n• Do: “Add 500 petrol”, “Salary 50000 received”, “Food budget 5000”, “Put 2000 in my bike goal”, “EMI paid”, “Delete the swiggy expense”, “Change the last entry to 450”, “Undo”.\n• Calculate & look up: “5 lakh loan 9% 5 years EMI”, “₹5,000 SIP for 10 years”, “100 dollars in rupees”, “Gold rate today”, “Google: who is the RBI governor”.\nI understand English, हिंदी, ગુજરાતી and Hinglish — by voice or text.",
+  hi: "मैं ये कर सकती हूं:\n• जवाब: “मेरा बैलेंस कितना है?”, “पिछले महीने खाने पर कितना खर्च हुआ?”, “पैसा कहां गया?”, “अगली EMI कब है?”, “बजट पार हुआ क्या?”\n• सोच-समझकर सलाह: “खर्च क्यों बढ़ा?”, “6 महीने में 1 लाख कैसे बचाऊं?”, “क्या मैं ₹50,000 का फोन ले सकता हूं?”, “मेरे गोल सही चल रहे हैं?”, “मेरा 50/30/20”\n• समझाना: “SIP क्या है?”, “इमरजेंसी फंड कितना चाहिए?”, “पहले कौन सा लोन चुकाऊं?”\n• काम: “500 का पेट्रोल जोड़ो”, “50000 सैलरी आई”, “खाने का बजट 5000”, “बाइक गोल में 2000 डालो”, “EMI भर दी”, “swiggy वाला खर्च हटाओ”, “आखिरी एंट्री 450 कर दो”, “वापस लो”।\n• हिसाब और खोज: “5 लाख लोन 9% 5 साल EMI”, “₹5,000 SIP 10 साल”, “100 डॉलर कितने रुपये”, “आज सोने का भाव”, “गूगल करो RBI गवर्नर कौन है”।\nमैं English, हिंदी, ગુજરાતી और Hinglish — बोलकर या लिखकर — समझती हूं।",
+  gu: "હું આ કરી શકું છું:\n• જવાબ: “મારું બેલેન્સ કેટલું છે?”, “ગયા મહિને ખાવામાં કેટલો ખર્ચ થયો?”, “પૈસા ક્યાં ગયા?”, “આગલી EMI ક્યારે છે?”, “બજેટ પાર થયું?”\n• વિચારીને સલાહ: “ખર્ચ કેમ વધ્યો?”, “6 મહિનામાં 1 લાખ કેવી રીતે બચાવું?”, “શું હું ₹50,000 નો ફોન લઈ શકું?”, “મારા ગોલ બરાબર ચાલે છે?”, “મારો 50/30/20”\n• સમજાવવું: “SIP શું છે?”, “ઇમરજન્સી ફંડ કેટલું જોઈએ?”, “કઈ લોન પહેલાં ચૂકવું?”\n• કામ: “500 નું પેટ્રોલ ઉમેરો”, “પગાર 50000 આવ્યો”, “ખાવાનું બજેટ 5000”, “બાઇક ગોલમાં 2000 નાખો”, “EMI ભરી દીધી”, “swiggy વાળો ખર્ચ કાઢો”, “છેલ્લી એન્ટ્રી 450 કરો”, “પાછું કરો”.\n• ગણતરી અને શોધ: “5 લાખ લોન 9% 5 વર્ષ EMI”, “₹5,000 SIP 10 વર્ષ”, “100 ડોલર કેટલા રૂપિયા”, “આજે સોનાનો ભાવ”, “ગૂગલ કરો RBI ગવર્નર કોણ છે”.\nહું English, हिंदी, ગુજરાતી અને Hinglish — બોલીને કે લખીને — સમજું છું.",
+  hn: "Main ye kar sakti hoon:\n• Jawab: “Mera balance kitna hai?”, “Pichle mahine food pe kitna kharcha hua?”, “Paisa kahan gaya?”, “Agli EMI kab hai?”, “Budget cross hua kya?”\n• Soch-samajh kar salah: “Kharcha kyu badha?”, “6 mahine mein 1 lakh kaise bachaun?”, “Kya main ₹50,000 ka phone le sakta hun?”, “Mere goals on track hain?”, “Mera 50/30/20”\n• Samjhana: “SIP kya hai?”, “Emergency fund kitna chahiye?”, “Pehle kaunsa loan chukaun?”\n• Kaam: “500 ka petrol add karo”, “50000 salary aayi”, “Food budget 5000”, “Bike goal mein 2000 daalo”, “EMI bhar di”, “Swiggy wala kharcha hatao”, “Last entry 450 kar do”, “Undo karo”.\n• Hisaab aur search: “5 lakh loan 9% 5 saal EMI”, “₹5,000 SIP 10 saal”, “100 dollar kitne rupaye”, “Aaj sone ka bhav”, “Google karo RBI governor kaun hai”.\nMain English, हिंदी, ગુજરાતી aur Hinglish — bolkar ya likhkar — samajhti hoon.",
 };
 
-export async function respond(inp: EngineInput): Promise<EngineResult> {
-  // Voice: if the main guess isn't understood but one of the browser's other guesses is, use that one.
-  if (inp.alts?.length && !inp.ctx?.pending) {
-    const today = ymd(todayUTC());
-    if (parse(inp.text, today).intent === "unknown") {
-      const alt = inp.alts.slice(0, 3).find((a) => parse(a, today).intent !== "unknown");
-      if (alt) return { ...(await respondInner({ ...inp, text: alt })), usedText: alt };
+/**
+ * Voice: the browser gives up to 5 guesses of what was said. The main guess is preferred, but when another guess
+ * makes clearly more sense (understood intent, an amount, a category, a period) that one is used.
+ */
+export function pickBestGuess(text: string, alts: string[] | undefined, today: string): string {
+  if (!alts?.length) return text;
+  const score = (t: string) => {
+    const p = parse(t, today);
+    return (p.intent !== "unknown" ? 2 : 0) + (p.amount ? 0.4 : 0) + (p.expenseCategory || p.incomeCategory ? 0.4 : 0) + (p.period ? 0.2 : 0) + (p.ml.ranked[0]?.score ?? 0);
+  };
+  let best = text;
+  let bestScore = score(text) + 0.35; // the browser's first guess is usually right
+  for (const a of alts.slice(0, 4)) {
+    if (!a || a === text) continue;
+    const sc = score(a);
+    if (sc > bestScore) {
+      best = a;
+      bestScore = sc;
     }
+  }
+  return best;
+}
+
+export async function respond(inp: EngineInput): Promise<EngineResult> {
+  if (inp.alts?.length && !inp.ctx?.pending) {
+    const best = pickBestGuess(inp.text, inp.alts, ymd(todayUTC()));
+    if (best !== inp.text) return { ...(await respondInner({ ...inp, text: best })), usedText: best };
   }
   return respondInner(inp);
 }
@@ -2021,6 +2116,17 @@ async function respondInner(inp: EngineInput): Promise<EngineResult> {
     }
     ctx.pending = null; // the user moved on to something else
   }
+
+  // ---------- 2a. payments / my plan ----------
+  {
+    const n = normalize(inp.text);
+    if (inp.actor.role === "admin" && PAYMENT_Q.test(n) && !p.amount && !p.hits.debt && !p.hits.self && !p.expenseCategory && inp.perms.includes("users.view")) return { reply: await answerPayments(lang, inp), ctx };
+    if (MY_PLAN_Q.test(n) && !p.planId) return { reply: await answerMyPlan(lang, inp), ctx };
+  }
+
+  // ---------- 2b. calculators, live prices, "google karo" — questions about the world ----------
+  const world = await worldAnswer(inp.text, p, lang, cur);
+  if (world) return { reply: world.reply, ctx, web: world.web };
 
   // ---------- 3. follow-ups ("aur pichle mahine?", "food pe?") ----------
   let intent = p.intent;
@@ -2232,6 +2338,11 @@ async function respondInner(inp: EngineInput): Promise<EngineResult> {
       out = await answerUsersQuery(lang, p, today);
       break;
     default: {
+      // Not about the user's money and not understood → a general question? Look it up on the web.
+      if (looksLikeQuestion(inp.text) && p.contentWords.length >= 1 && !p.amount && !p.ml.ranked.some((r) => r.score >= 0.45 && r.intent !== "identity")) {
+        const w = await webReply(inp.text, lang);
+        if (w.found) return { reply: reply(lang, w.text, { speak: w.speak, cards: w.cards, suggestions: sug(lang, "start") }), ctx, web: true };
+      }
       // Nothing matched: answer kindly, say what Angel can do, and offer questions that fit THIS user —
       // starting with what the learned model THINKS was meant ("Did you mean…?").
       const debts = await T.debtsOf(String(inp.actor._id));

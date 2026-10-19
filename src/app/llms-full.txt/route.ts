@@ -23,7 +23,13 @@ Maker: Dhrumil Panchal
 - Angel AI suggestions in English, Hindi, Gujarati or Hinglish
 
 ## Angel AI assistant
-Angel is Budget Pro's own AI (no third-party AI provider). It understands free-form questions in English, हिंदी, ગુજરાતી and Hinglish, typed or spoken, including Indian number words ("dedh lakh", "2.5k") and relative dates ("kal", "pichle 3 mahine"). It answers from the user's real data, explains changes ("why did my spending go up?"), checks budgets and goals, plans savings, judges affordability, explains money concepts (SIP, CIBIL, tax basics, emergency fund, avalanche vs snowball) and performs actions (add expense/income, set budget, goal contribution/withdrawal, EMI payment, delete/edit entries, undo). Users only ever access their own data; admins can manage users with confirmation.
+Angel is Budget Pro's own AI (no third-party AI provider). It understands free-form questions in English, हिंदी, ગુજરાતી and Hinglish, typed or spoken, including Indian number words ("dedh lakh", "2.5k") and relative dates ("kal", "pichle 3 mahine"). It answers from the user's real data, explains changes ("why did my spending go up?"), checks budgets and goals, plans savings, judges affordability, explains money concepts (SIP, CIBIL, tax basics, emergency fund, avalanche vs snowball) and performs actions (add expense/income, set budget, goal contribution/withdrawal, EMI payment, delete/edit entries, undo). Users only ever access their own data; admins can manage users with confirmation. It also calculates EMI, SIP, FD, RD, GST, inflation and currency conversions from a sentence ("5 lakh loan 9% 5 saal EMI"), and looks general questions up on the web, always showing sources. Visitors can try Angel without an account (limited credits). Every plan includes Angel; limited plans get credits that refill every few hours and Unlimited has no limit.
+
+## Free calculators (no sign-up)
+Income tax FY 2026-27 (new vs old regime with 87A rebate, surcharge, cess), EMI, SIP, FD, RD, PPF, GST, inflation, loan prepayment, compound interest, retirement corpus, emergency fund, net worth, live currency converter, 50/30/20 budget planner and savings goal calculator — at ${SITE_URL}/tools.
+
+## Payments
+Paid plans are bought monthly in INR through Razorpay (UPI, cards, netbanking, wallets). No auto-renewal; a refund & cancellation policy is published at ${SITE_URL}/refund-policy.
 
 ## Plans
 ${plans}

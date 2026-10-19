@@ -1,6 +1,6 @@
 {
   "name": "budget-pro",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "description": "Budget Pro — professional personal finance SaaS (Next.js + MongoDB, Vercel-ready)",
   "scripts": {
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit",
     "vapid": "node scripts/generate-vapid.mjs",
     "make-admin": "node scripts/make-admin.mjs",
-    "test:angel": "npx --yes tsx scripts/test-angel.ts && npx --yes tsx scripts/eval-angel.ts"
+    "test:angel": "npx --yes tsx scripts/test-angel.ts && npx --yes tsx scripts/eval-angel.ts && npx --yes tsx scripts/test-world.ts"
   },
   "engines": {
     "node": ">=20.9.0"

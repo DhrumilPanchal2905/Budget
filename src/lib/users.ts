@@ -1,3 +1,5 @@
+import { effectivePlanId } from "./plans";
+import { invalidateUserCache } from "./auth";
 import type { Types } from "mongoose";
 import { AngelConversation, AngelMessage, AuditLog, Notification, Passkey, PushSubscription, Session, User, oid, type UserDoc } from "./models";
 import { purgeUserFinance } from "./finance";
@@ -22,6 +24,7 @@ export async function deleteUserCompletely(userId: Types.ObjectId | string) {
   ]);
   await AuditLog.updateMany({ actorId: id }, { $set: { actorEmail: "deleted-user" } });
   await User.deleteOne({ _id: id });
+  invalidateUserCache(String(id));
 }
 
 /** Prevents removing/disabling/demoting the last active administrator. */
@@ -45,7 +48,9 @@ export function adminUserView(u: UserDoc) {
     name: u.name,
     email: u.email,
     role: u.role,
-    plan: u.plan,
+    plan: effectivePlanId(u),
+    planExpiresAt: u.planExpiresAt && effectivePlanId(u) !== "free" ? new Date(u.planExpiresAt).toISOString() : null,
+    planSource: u.planSource ?? null,
     status: u.status,
     currency: u.currency || "INR",
     permissions: u.permissions ?? [],

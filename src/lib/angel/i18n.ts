@@ -138,7 +138,8 @@ export function greetingByHour(lang: Lang, hour: number, firstName: string): str
   const hi = ["सुप्रभात", "नमस्ते", "शुभ संध्या"][part];
   const gu = ["સુપ્રભાત", "નમસ્તે", "શુભ સાંજ"][part];
   const hn = ["Good morning", "Namaste", "Good evening"][part];
-  return L(lang, { en: `${en}, ${firstName}!`, hi: `${hi}, ${firstName}!`, gu: `${gu}, ${firstName}!`, hn: `${hn}, ${firstName}!` });
+  const n = firstName.trim() ? `, ${firstName.trim()}` : "";
+  return L(lang, { en: `${en}${n}!`, hi: `${hi}${n}!`, gu: `${gu}${n}!`, hn: `${hn}${n}!` });
 }
 
 export function signedMoney(major: number, currency: string) {

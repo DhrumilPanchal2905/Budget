@@ -8,6 +8,7 @@ import { formatMoney, fromMinor } from "@/lib/money";
 import { audit } from "@/lib/audit";
 import { runRecurring } from "@/lib/recurring";
 import { ensureIndexes } from "@/lib/db";
+import { expirePlans } from "@/lib/billing";
 
 // Daily Vercel Cron job (see vercel.json): EMI due-date reminders + auto-repeat entries + index check.
 export const runtime = "nodejs";
@@ -58,7 +59,13 @@ export async function GET(req: NextRequest) {
   } catch (err) {
     console.error("[cron] recurring failed", (err as Error).message);
   }
+  let plans = { expired: 0, reminded: 0 };
+  try {
+    plans = await expirePlans();
+  } catch (err) {
+    console.error("[cron] plan expiry failed", (err as Error).message);
+  }
   await ensureIndexes(false).catch(() => null);
-  await audit({ actor: null, action: "system.cron.reminders", metadata: { sent, recurring } });
-  return NextResponse.json({ success: true, sent, recurring });
+  await audit({ actor: null, action: "system.cron.reminders", metadata: { sent, recurring, plans } });
+  return NextResponse.json({ success: true, sent, recurring, plans });
 }

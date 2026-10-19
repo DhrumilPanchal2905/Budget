@@ -28,6 +28,7 @@ export const LEX = {
 
   // ---------------- topics ----------------
   balance: [
+    "=khata", "=khate", "=khaata", "=khaate", "=khatama", "खाते", "खाता", "ખાતામાં", "ખાતું",
     "net worth", "=networth", "have left", "=left", "in my wallet", "=wallet", "pada hai", "pade hai", "pada he", "reh gaye", "=jama", "नेट वर्थ", "બાકી રહ્યા",
     "balance", "=bal", "money left", "money do i have", "how much money", "=funds", "=cash", "net balance", "current balance",
     "belens", "balans", "kitne paise", "kitna paisa", "paise kitne", "paisa kitna", "=bacha", "=bache", "=bachi", "mere pas", "kitna pada", "kitne pade",
@@ -49,6 +50,7 @@ export const LEX = {
     "kamai", "kamaya", "kamaye", "amdani", "aamdani", "=aay", "=aamad", "pagar", "pagaar", "aavak", "avak", "kamani", "vetan", "tankhwah", "tankha",
     "आमदनी", "=आय", "कमाई", "कमाया", "कमाए", "सैलरी", "वेतन", "तनख्वाह", "तनखा", "इनकम",
     "આવક", "કમાણી", "કમાયા", "કમાવ્યા", "પગાર", "સેલરી", "ઇન્કમ", "ઈન્કમ",
+    "paise aaye", "paisa aaya", "rupaye aaye", "paisa aavya", "पैसे आए", "पैसे आये", "पैसा आया", "રૂપિયા આવ્યા", "પૈસા આવ્યા",
   ],
   savings: [
     "bacha liya", "bacha li", "save kar liya", "save kar li", "bachavi lidha", "બચાવી લીધા",
@@ -241,7 +243,7 @@ export const LEX = {
 
   // ---------------- new: budgets, reasoning, knowledge, admin ----------------
   budgetWord: ["=budget", "=budgets", "=limit", "=limits", "=cap", "बजट", "लिमिट", "બજેટ", "લિમિટ", "=bajat"],
-  budgetCue: [
+  budgetCue: [ "=within", "=under", "=andar", "=inside", "अंदर", "અંદર",
     "=left", "=remaining", "=remain", "=bacha", "=bachi", "=bache", "=baki", "=baaki", "=over", "=cross", "=crossed", "=exceed", "=exceeded", "=status", "=khatam", "=paar", "=par", "=kitna", "=kitni", "=ketlu", "=ketlo", "how much", "=used", "=spent", "can i still", "aur kitna",
     "बचा", "बाकी", "पार", "खत्म", "कितना", "બાકી", "બચ્યું", "પાર", "પૂરું", "કેટલું",
   ],

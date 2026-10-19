@@ -4,7 +4,9 @@ import { AngelConversation, AngelMessage, isObjectId, oid } from "@/lib/models";
 import { rateLimit } from "@/lib/ratelimit";
 import { Errors } from "@/lib/errors";
 import { respond, actionView, type AngelContext } from "@/lib/angel/engine";
-import { assertAngel, messageDTO, undoLatest } from "@/lib/angel/server";
+import { assertAngel, messageDTO, quotaDTO, undoLatest } from "@/lib/angel/server";
+import { baseCost, charge, consume, quotaForUser, refund, userKey } from "@/lib/angel/quota";
+import { ANGEL_COST } from "@/lib/plans";
 
 export const runtime = "nodejs";
 
@@ -13,7 +15,7 @@ const bodySchema = z.object({
   conversationId: z.string().max(40).nullable().optional(),
   source: z.enum(["voice", "text"]).default("text"),
   lang: z.enum(["auto", "en", "hi", "gu", "hn"]).default("auto"),
-  alts: z.array(z.string().trim().max(1000)).max(3).optional(),
+  alts: z.array(z.string().trim().max(1000)).max(4).optional(),
 });
 
 /** Send a message to Angel → Angel's answer (and any action it took). Both are saved in the chat history. */
@@ -21,13 +23,27 @@ export const POST = route({}, async ({ req, user, perms, ip }) => {
   assertAngel(user);
   await rateLimit(`angel:${String(user._id)}`, 40, 60);
   const body = await parseBody(req, bodySchema);
-
-  let conv = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let conv: any = null;
   if (body.conversationId) {
     if (!isObjectId(body.conversationId)) throw Errors.notFound("Chat");
     conv = await AngelConversation.findOne({ _id: oid(body.conversationId), userId: user._id });
     if (!conv) throw Errors.notFound("Chat");
   }
+  // Angel credits: the base cost is taken BEFORE answering (so an empty window stops here); extras after.
+  // If answering fails, the credit is given back.
+  const quota = quotaForUser(user);
+  const qKey = userKey(user._id);
+  const cost = baseCost(body.message);
+  let qState = await consume(qKey, quota, cost);
+  try {
+    return await answer();
+  } catch (e) {
+    if (quota.credits !== null) await refund(qKey, cost).catch(() => null);
+    throw e;
+  }
+
+  async function answer() {
   if (!conv) {
     conv = await AngelConversation.create({ userId: user._id, title: body.message.slice(0, 60), context: {}, lastMessageAt: new Date() });
   }
@@ -75,6 +91,9 @@ export const POST = route({}, async ({ req, user, perms, ip }) => {
     }
   }
 
+  const extra = (result.web ? ANGEL_COST.web : 0) + (r.action?.status === "done" || result.updateMessage?.action.status === "done" ? ANGEL_COST.action : 0);
+  if (extra) qState = await charge(qKey, quota, extra);
+
   conv.context = ctx;
   conv.markModified("context");
   conv.lang = r.lang;
@@ -89,5 +108,7 @@ export const POST = route({}, async ({ req, user, perms, ip }) => {
     updated,
     speak: r.speak,
     lang: r.lang,
+    quota: quotaDTO(qState, user),
   });
+  }
 });

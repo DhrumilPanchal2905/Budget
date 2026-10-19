@@ -30,8 +30,7 @@ import {
   MoreHorizontal,
   Wallet,
   Globe,
-  SlidersHorizontal,
-} from "lucide-react";
+  SlidersHorizontal, IndianRupee } from "lucide-react";
 import { api, timeAgo } from "@/lib/client";
 import { THEMES } from "@/lib/themes";
 import type { Permission } from "@/lib/permissions";
@@ -61,12 +60,13 @@ const MAIN_NAV: NavItem[] = [
   { href: "/notifications", label: "Notifications", icon: Bell, perm: "notifications.read" },
 ];
 const ACCOUNT_NAV: NavItem[] = [
-  { href: "/plan", label: "Plan & usage", icon: CreditCard },
+  { href: "/plan", label: "Plan & billing", icon: CreditCard },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 const ADMIN_NAV: NavItem[] = [
   { href: "/admin", label: "Admin overview", icon: Gauge, perm: "users.view" },
   { href: "/admin/users", label: "Users", icon: Users, perm: "users.view" },
+  { href: "/admin/payments", label: "Payments", icon: IndianRupee, perm: "users.view" },
   { href: "/admin/visitors", label: "Visitors (live)", icon: Globe, perm: "users.view" },
   { href: "/admin/database", label: "Database", icon: Database, perm: "database.view" },
   { href: "/admin/audit", label: "Audit log", icon: ScrollText, perm: "audit.view" },
@@ -133,7 +133,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-/** "Angel AI" entry at the top of the menu (Unlimited plan / admins only). */
+/** "Angel AI" entry at the top of the menu (every plan). */
 function AngelNavItem({ onNavigate }: { onNavigate?: () => void }) {
   const angel = useAngelOptional();
   if (!angel?.eligible) return null;
