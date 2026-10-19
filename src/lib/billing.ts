@@ -108,11 +108,19 @@ export async function activatePayment(orderId: string, paymentId: string, via: "
     return { ok: false, status: "failed", message: "Payment details did not match the order." };
   }
   if (rp.status === "authorized") {
-    try {
-      rp = await capturePayment(paymentId, pay.amount);
-    } catch (e) {
-      console.error("[billing] capture failed", (e as Error).message);
-      return { ok: false, status: "pending", message: "Payment is authorized but not captured yet. It will be confirmed automatically." };
+    // a webhook snapshot can be a few seconds old — Razorpay usually auto-captures right away, so look again first
+    if (rp === known) rp = await fetchPayment(paymentId);
+    if (rp.status === "authorized") {
+      try {
+        rp = await capturePayment(paymentId, pay.amount);
+      } catch (e) {
+        // "already been captured" = someone (Razorpay auto-capture / a parallel call) was faster → that's fine
+        rp = await fetchPayment(paymentId).catch(() => rp);
+        if (rp.status !== "captured") {
+          console.error("[billing] capture failed", (e as Error).message);
+          return { ok: false, status: "pending", message: "Payment is authorized but not captured yet. It will be confirmed automatically." };
+        }
+      }
     }
   }
   if (rp.status === "failed") {

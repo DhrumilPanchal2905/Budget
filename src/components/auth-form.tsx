@@ -25,6 +25,9 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
   const sp = useSearchParams();
   const toast = useToast();
   const [view, setView] = useState<View>(mode === "login" ? "loading" : "form");
+  // until the page is interactive, block the browser's own form submit (it would POST /login → 405)
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
   const [device, setDevice] = useState<RememberedDevice | null>(null);
   const [supported, setSupported] = useState(false);
   const [name, setName] = useState("");
@@ -244,7 +247,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
           />
         </Field>
         {formError && <p className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger" role="alert">{formError}</p>}
-        <Button type="submit" className="w-full" size="lg" loading={loading} disabled={otp.length !== 6}>
+        <Button type="submit" className="w-full" size="lg" loading={loading} disabled={!hydrated || otp.length !== 6}>
           Verify & create account
         </Button>
         <div className="flex items-center justify-between text-sm">
@@ -361,7 +364,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
       )}
 
       {formError && <p className="rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger" role="alert">{formError}</p>}
-      <Button type="submit" className="w-full" size="lg" loading={loading}>
+      <Button type="submit" className="w-full" size="lg" loading={loading} disabled={!hydrated}>
         {mode === "login" ? "Sign in" : "Continue — verify email"}
       </Button>
       <p className="flex items-center justify-center gap-1 text-[11px] text-muted" title="Session is kept in a secure HttpOnly cookie and every request is end-to-end encrypted.">
